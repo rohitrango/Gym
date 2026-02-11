@@ -24,21 +24,24 @@ responses_api_models/openai_model/configs/openai_model.yaml"
 ng_prepare_data "+config_paths=[$config_paths]" \
     +output_dirpath=data/cohesity_netbackup_rag \
     +mode=train_preparation \
-    +should_download=true
+    +should_download=true \
+    +data_source=gitlab
 
 config_paths="resources_servers/crowdstrike_logscale_syntax/configs/crowdstrike_logscale_syntax.yaml,\
 responses_api_models/openai_model/configs/openai_model.yaml"
 ng_prepare_data "+config_paths=[$config_paths]" \
     +output_dirpath=data/crowdstrike_logscale_syntax \
     +mode=train_preparation \
-    +should_download=true
+    +should_download=true \
+    +data_source=gitlab
 
 config_paths="resources_servers/servicenow_document_reasoning/configs/servicenow_document_reasoning.yaml,\
 responses_api_models/openai_model/configs/openai_model.yaml"
 ng_prepare_data "+config_paths=[$config_paths]" \
     +output_dirpath=data/servicenow_document_reasoning \
     +mode=train_preparation \
-    +should_download=true
+    +should_download=true \
+    +data_source=gitlab
 ```
 
 # Run
