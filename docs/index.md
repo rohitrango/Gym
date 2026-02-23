@@ -109,14 +109,6 @@ Generate batches of scored interactions and view them with the rollout viewer.
 {bdg-secondary}`10 min` {bdg-secondary}`rollouts` {bdg-secondary}`training-data`
 :::
 
-:::{grid-item-card} {octicon}`play;1.5em;sd-mr-1` First Training Run
-:link: get-started/first-training-run
-:link-type: doc
-Train a Sudoku-solving model with GRPO using a self-contained Colab notebook.
-+++
-{bdg-secondary}`30 min` {bdg-secondary}`training` {bdg-secondary}`colab`
-:::
-
 ::::
 
 ## Environment Configuration
@@ -157,6 +149,14 @@ Learn how to build custom training environments for various RL scenarios.
 Build a complete training environment from scratch.
 +++
 {bdg-primary}`beginner` {bdg-secondary}`foundational`
+:::
+
+:::{grid-item-card} {octicon}`stack;1.5em;sd-mr-1` Multi-Environment Training
+:link: environment-tutorials/multi-environment-training
+:link-type: doc
+Run multiple training environments simultaneously for rollout collection.
++++
+{bdg-secondary}`multi-environment` {bdg-secondary}`multi-verifier`
 :::
 
 ::::
@@ -269,7 +269,6 @@ Ecosystem <about/ecosystem>
 Quickstart <get-started/index>
 Detailed Setup Guide <get-started/detailed-setup.md>
 Rollout Collection <get-started/rollout-collection.md>
-🟡 First Training Run <get-started/first-training-run.md>
 ```
 
 ```{toctree}
@@ -277,8 +276,8 @@ Rollout Collection <get-started/rollout-collection.md>
 :hidden:
 :maxdepth: 1
 
-🟡 Overview <model-server/index>
-🟡 vLLM <model-server/vllm>
+Overview <model-server/index>
+vLLM <model-server/vllm>
 ```
 
 ```{toctree}
@@ -297,7 +296,7 @@ Download from Hugging Face <data/download-huggingface>
 :maxdepth: 1
 
 Overview <environment-tutorials/index>
-🟡 Creating Training Environment <environment-tutorials/creating-training-environment>
+Creating Training Environment <environment-tutorials/creating-training-environment>
 Multi-Environment Training <environment-tutorials/multi-environment-training>
 ```
 
@@ -309,7 +308,7 @@ Multi-Environment Training <environment-tutorials/multi-environment-training>
 Overview <training-tutorials/index>
 NeMo RL <training-tutorials/nemo-rl-grpo/index.md>
 TRL <training-tutorials/trl>
-Unsloth <training-tutorials/unsloth-training>
+Unsloth <training-tutorials/unsloth>
 Offline Training (SFT/DPO) <training-tutorials/offline-training-w-rollouts>
 ```
 
@@ -318,8 +317,8 @@ Offline Training (SFT/DPO) <training-tutorials/offline-training-w-rollouts>
 :hidden:
 :maxdepth: 1
 
-🟡 Overview <model-recipes/index>
-🟡 Nemotron 3 Nano <model-recipes/nemotron-nano>
+Overview <model-recipes/index>
+Nemotron 3 Nano <model-recipes/nemotron-3-nano>
 ```
 
 ```{toctree}
@@ -329,7 +328,7 @@ Offline Training (SFT/DPO) <training-tutorials/offline-training-w-rollouts>
 
 Overview <infrastructure/index>
 Deployment Topology <infrastructure/deployment-topology>
-SWE RL Case Study <infrastructure/swe-rl-case-study>
+Engineering Notes <infrastructure/engineering-notes/index>
 ```
 
 ```{toctree}
