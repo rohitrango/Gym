@@ -39,6 +39,7 @@ from nemo_gym.openai_utils import (
 )
 from resources_servers.terminus_judge.schemas import TERMINUS_1_SCHEMA, TERMINUS_2_SCHEMA
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -317,8 +318,7 @@ class TerminusJudgeResourcesServer(SimpleResourcesServer):
 
         if not isinstance(pred, dict):
             logger.info(
-                f"terminus_judge verify | uuid={body.uuid} "
-                f"model output parsed to {type(pred).__name__}, not dict"
+                f"terminus_judge verify | uuid={body.uuid} model output parsed to {type(pred).__name__}, not dict"
             )
             failure_reason = FailureCode.MODEL_OUTPUT_INVALID
             return _build_response(expected_str=expected, model_output_str=text)
@@ -368,9 +368,7 @@ class TerminusJudgeResourcesServer(SimpleResourcesServer):
             # Step 1: String similarity check (if enabled)
             if self.config.enable_string_similarity:
                 similarity_score = command_similarity(expected_dict, pred)
-                threshold = (
-                    body.threshold if body.threshold is not None else self.config.string_similarity_threshold
-                )
+                threshold = body.threshold if body.threshold is not None else self.config.string_similarity_threshold
                 logger.info(
                     f"terminus_judge verify | uuid={body.uuid} "
                     f"string_similarity={similarity_score:.4f} threshold={threshold}"
@@ -523,9 +521,7 @@ class TerminusJudgeResourcesServer(SimpleResourcesServer):
         eval_record.verdict_label = verdict_label
         return is_equal, eval_record
 
-    def _parse_verdict_from_text(
-        self, text: str, equal_label: str, not_equal_label: str
-    ) -> tuple[bool, str | None]:
+    def _parse_verdict_from_text(self, text: str, equal_label: str, not_equal_label: str) -> tuple[bool, str | None]:
         """Parse verdict from judge response text.
 
         Uses a two-stage strategy:

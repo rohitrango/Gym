@@ -693,9 +693,7 @@ class TestParseVerdictFromText:
 
     def test_parse_rubrics_v4_equal_structured(self, resources_server: TerminusJudgeResourcesServer):
         """Test parsing rubrics v4 structured output with [[A=B]] verdict."""
-        is_equal, verdict = resources_server._parse_verdict_from_text(
-            RUBRICS_V4_EQUAL_RESPONSE, "[[A=B]]", "[[A!=B]]"
-        )
+        is_equal, verdict = resources_server._parse_verdict_from_text(RUBRICS_V4_EQUAL_RESPONSE, "[[A=B]]", "[[A!=B]]")
         assert is_equal is True
         assert verdict == "[[A=B]]"
 
@@ -914,7 +912,9 @@ class TestVerifyWithRubricsV4JudgeResponse:
                         "id": "msg_judge",
                         "type": "message",
                         "role": "assistant",
-                        "content": [{"type": "output_text", "text": RUBRICS_V4_MULTILINE_REASONING, "annotations": []}],
+                        "content": [
+                            {"type": "output_text", "text": RUBRICS_V4_MULTILINE_REASONING, "annotations": []}
+                        ],
                     }
                 ],
                 "parallel_tool_calls": False,
@@ -951,7 +951,9 @@ class TestVerifyWithRubricsV4JudgeResponse:
                         "id": "msg_judge",
                         "type": "message",
                         "role": "assistant",
-                        "content": [{"type": "output_text", "text": "I cannot determine equivalence.", "annotations": []}],
+                        "content": [
+                            {"type": "output_text", "text": "I cannot determine equivalence.", "annotations": []}
+                        ],
                     }
                 ],
                 "parallel_tool_calls": False,
@@ -1246,9 +1248,7 @@ class TestVerifyAdditionalScenarios:
         assert len(response.judge_evaluations) == 2
 
     @pytest.mark.asyncio
-    async def test_swap_check_second_parsing_fails(
-        self, resources_server_with_swap: TerminusJudgeResourcesServer
-    ):
+    async def test_swap_check_second_parsing_fails(self, resources_server_with_swap: TerminusJudgeResourcesServer):
         """Test swap check: first judge passes, second judge parsing fails."""
         expected_answer = create_terminus_1_response([{"keystrokes": "ls -la\n"}])
         pred_answer = create_terminus_1_response([{"keystrokes": "different command\n"}])
@@ -1293,15 +1293,11 @@ class TestVerifyAdditionalScenarios:
     # --- Invalid Expected Answer Tests ---
 
     @pytest.mark.asyncio
-    async def test_expected_answer_invalid_json(
-        self, resources_server_string_sim_only: TerminusJudgeResourcesServer
-    ):
+    async def test_expected_answer_invalid_json(self, resources_server_string_sim_only: TerminusJudgeResourcesServer):
         """Test verify fails gracefully when expected_answer is invalid JSON."""
         pred_answer = create_terminus_1_response([{"keystrokes": "ls\n"}])
         model_output = json.dumps(pred_answer)
-        request = self._create_verify_request_raw_expected(
-            model_output, "not valid json {{{", "terminus_1"
-        )
+        request = self._create_verify_request_raw_expected(model_output, "not valid json {{{", "terminus_1")
 
         response = await resources_server_string_sim_only.verify(request)
 
@@ -1563,9 +1559,7 @@ class TestNonDictJsonParsing:
     async def test_model_output_number_after_think_tags(self, resources_server: TerminusJudgeResourcesServer):
         """Model outputs <think>reasoning</think>42 — bare number after think tags."""
         expected = create_terminus_1_response([{"keystrokes": "ls\n"}])
-        request = self._create_verify_request_raw(
-            "<think>The answer is 42</think>42", json.dumps(expected)
-        )
+        request = self._create_verify_request_raw("<think>The answer is 42</think>42", json.dumps(expected))
 
         response = await resources_server.verify(request)
 

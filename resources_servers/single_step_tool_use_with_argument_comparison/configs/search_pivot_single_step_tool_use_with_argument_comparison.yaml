@@ -5,6 +5,7 @@ search_pivot_single_step_tool_use_with_argument_comparison_resources_server:
       domain: agent
       tool_call_comparator_config:
         word_count_similarity_threshold: 0.3
+      verified: false
 search_pivot_single_step_tool_use_with_argument_comparison_agent:
   responses_api_agents:
     tool_simulation_agent:
