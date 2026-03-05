@@ -14,31 +14,28 @@
 # limitations under the License.
 import asyncio
 import json
-from typing import Optional, ClassVar
-from urllib.parse import urlparse
-from pydantic import BaseModel, PrivateAttr
 import re
+from typing import ClassVar, Optional
+from urllib.parse import urlparse
+
 from fastapi import FastAPI
-from tavily import UsageLimitExceededError
-from nemo_gym.config_types import ModelServerRef
+from judge_prompt import JUDGE_PROMPT_TEMPLATE
+from pydantic import BaseModel, PrivateAttr
+from tavily import AsyncTavilyClient, UsageLimitExceededError
 
 from nemo_gym.base_resources_server import (
-    SimpleResourcesServer,
     BaseResourcesServerConfig,
     BaseRunRequest,
     BaseVerifyRequest,
     BaseVerifyResponse,
+    SimpleResourcesServer,
 )
-
+from nemo_gym.config_types import ModelServerRef
 from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
 )
-
-from judge_prompt import JUDGE_PROMPT_TEMPLATE
-
-from tavily import AsyncTavilyClient
 
 
 class TavilySearchResourcesServerConfig(BaseResourcesServerConfig):
@@ -51,34 +48,43 @@ class TavilySearchResourcesServerConfig(BaseResourcesServerConfig):
     retry_delay_seconds: int = 30  # Delay between retries in seconds
     debug: bool = False
 
+
 class TavilySearchRequest(BaseModel):
-    query: Optional[str] = None # Make optional to handle missing args gracefully 
+    query: Optional[str] = None  # Make optional to handle missing args gracefully
+
 
 class TavilySearchResponse(BaseModel):
     results_string: str
+
 
 class FindInPageRequest(BaseModel):
     url: Optional[str] = None
     query: Optional[str] = None
 
+
 class FindInPageResponse(BaseModel):
     results_string: str
+
 
 class ScrollPageRequest(BaseModel):
     url: Optional[str] = None
     start_index: int = 0
     n: int = 2000
 
+
 class ScrollPageResponse(BaseModel):
     results_string: str
     total_words: int
+
 
 class TavilySearchRunRequest(BaseRunRequest):
     ground_truth: str
     question: str
 
+
 class TavilySearchVerifyRequest(TavilySearchRunRequest, BaseVerifyRequest):
     pass
+
 
 class JudgeEvaluation(BaseModel):
     judge_response_create_params: Optional[NeMoGymResponseCreateParamsNonStreaming] = None
@@ -87,8 +93,10 @@ class JudgeEvaluation(BaseModel):
     reward: float
     judge_response: Optional[NeMoGymResponse] = None
 
+
 class TavilySearchVerifyResponse(BaseVerifyResponse, JudgeEvaluation):
     pass
+
 
 class TavilySearchResourcesServer(SimpleResourcesServer):
     config: TavilySearchResourcesServerConfig
@@ -114,7 +122,7 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
         app.post("/scroll_page")(self.scroll_page)
 
         return app
-    
+
     async def web_search(self, body: TavilySearchRequest) -> TavilySearchResponse:
         if self.config.debug:
             print("\n\n body.query: ", body.query)
@@ -123,17 +131,17 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
 
         if len(body.query) > 400:
             return TavilySearchResponse(results_string="Query is too long")
-        
+
         max_retries = self.config.max_retries
         retry_delay_seconds = self.config.retry_delay_seconds
-        
+
         for attempt in range(max_retries):
             try:
                 results = await self._async_tavily.search(
-                    body.query, 
-                    max_results=self.MAX_RESULTS, 
+                    body.query,
+                    max_results=self.MAX_RESULTS,
                     exclude_domains=self._exclude_domains,
-                    search_depth="advanced"
+                    search_depth="advanced",
                 )
                 break  # Success, exit the retry loop
             except UsageLimitExceededError as e:
@@ -203,7 +211,7 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
         header = (
             f"Content from: {domain}\n"
             f"URL: {body.url}\n"
-            f"Query: \"{body.query}\"\n"
+            f'Query: "{body.query}"\n'
             f"========================================\n"
         )
         footer = ""
@@ -262,7 +270,7 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
 
         words = page_content.split()
         total_words = len(words)
-        sliced_words = words[body.start_index:body.start_index + body.n]
+        sliced_words = words[body.start_index : body.start_index + body.n]
         chunk_text = " ".join(sliced_words)
 
         # Format: header + clean + line numbers
@@ -292,17 +300,14 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
             judge_evaluation = await self._verify_answer_with_judge(question, ground_truth, last_assistant_response)
         else:
             judge_evaluation = self._verify_answer_with_regex(ground_truth, last_assistant_response)
-        return TavilySearchVerifyResponse(**body.model_dump(), **judge_evaluation.model_dump()) 
+        return TavilySearchVerifyResponse(**body.model_dump(), **judge_evaluation.model_dump())
 
     ###### UTILITY FUNCTIONS ######
 
     def _is_url_excluded(self, url: str) -> bool:
         """Check if the URL's domain is in the excluded domains list."""
         hostname = urlparse(url).hostname or ""
-        return any(
-            hostname == domain or hostname.endswith("." + domain)
-            for domain in self._exclude_domains
-        )
+        return any(hostname == domain or hostname.endswith("." + domain) for domain in self._exclude_domains)
 
     def _extract_domain(self, url: str) -> str:
         """Extract domain from URL."""
@@ -311,26 +316,26 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
     def _clean_text(self, text: str) -> str:
         """Remove wiki/web navigation artifacts and normalize whitespace."""
         # Strip [edit] markers
-        text = re.sub(r'\[edit\]', '', text)
+        text = re.sub(r"\[edit\]", "", text)
         # Strip wiki navigation chrome lines: [Jump to content], [Search...], [Read], [View history], etc.
-        text = re.sub(r'^\[(?:Jump to content|Search|Read|Edit|View history)[^\]]*\].*$', '', text, flags=re.MULTILINE)
+        text = re.sub(r"^\[(?:Jump to content|Search|Read|Edit|View history)[^\]]*\].*$", "", text, flags=re.MULTILINE)
         # Strip wiki language sidebar links: [LangName](https://xx.wikipedia.org/...)
-        text = re.sub(r'\[[^\]]+\]\(https?://[a-z]{2,3}\.wikipedia\.org/[^\)]*\)', '', text)
+        text = re.sub(r"\[[^\]]+\]\(https?://[a-z]{2,3}\.wikipedia\.org/[^\)]*\)", "", text)
         # Strip table-of-contents anchor links: * [(Top)](#) etc.
-        text = re.sub(r'^\s*\*\s*\[[^\]]*\]\(#[^\)]*\)\s*$', '', text, flags=re.MULTILINE)
+        text = re.sub(r"^\s*\*\s*\[[^\]]*\]\(#[^\)]*\)\s*$", "", text, flags=re.MULTILINE)
         # Strip zero-width spaces and special unicode
-        text = text.replace('\u200b', '').replace('\u200c', '').replace('\u200d', '').replace('\ufeff', '')
-        text = text.replace('\u3010', '[').replace('\u3011', ']')
+        text = text.replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+        text = text.replace("\u3010", "[").replace("\u3011", "]")
         # Strip trailing whitespace per line
-        text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
+        text = re.sub(r"[ \t]+$", "", text, flags=re.MULTILINE)
         # Collapse 3+ consecutive newlines to 2 (one blank line)
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 
     def _add_line_numbers(self, text: str) -> str:
         """Add L0:, L1:, ... prefix per line."""
-        lines = text.split('\n')
-        return '\n'.join(f'L{i}: {line}' for i, line in enumerate(lines))
+        lines = text.split("\n")
+        return "\n".join(f"L{i}: {line}" for i, line in enumerate(lines))
 
     def _truncate_text(self, text: str, max_chars: int = None) -> tuple:
         """Truncate text to max_chars, snapping to last full line boundary.
@@ -341,7 +346,7 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
         if len(text) <= max_chars:
             return text, False
         # Find the last newline within max_chars
-        cut = text.rfind('\n', 0, max_chars)
+        cut = text.rfind("\n", 0, max_chars)
         if cut == -1:
             cut = max_chars
         return text[:cut], True
@@ -354,13 +359,11 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
 
         formatted_results = ["Search Results\n==============\n"]
         for i, result in enumerate(results["results"], 1):
-            domain = self._extract_domain(result['url'])
-            snippet = self._clean_text(result.get('content', ''))
+            domain = self._extract_domain(result["url"])
+            snippet = self._clean_text(result.get("content", ""))
             snippet, _ = self._truncate_text(snippet)
             formatted_results.append(
-                f"[{i}] {result['title']} ({domain})\n"
-                f"    URL: {result['url']}\n"
-                f"    Summary: {snippet}\n\n"
+                f"[{i}] {result['title']} ({domain})\n    URL: {result['url']}\n    Summary: {snippet}\n\n"
             )
         return formatted_results
 
@@ -376,15 +379,13 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
                     exclude_domains.append(prop["value"])
         return exclude_domains
 
-
     async def _verify_answer_with_judge(self, question: str, ground_truth: str, response: str) -> JudgeEvaluation:
-
-        async def _get_judge_response(question: str, ground_truth: str, response: str) -> tuple[NeMoGymResponseCreateParamsNonStreaming, NeMoGymResponse]:
+        async def _get_judge_response(
+            question: str, ground_truth: str, response: str
+        ) -> tuple[NeMoGymResponseCreateParamsNonStreaming, NeMoGymResponse]:
             judge_create_params = self.config.judge_responses_create_params.model_copy(deep=True)
             judge_prompt = self.JUDGE_PROMPT_TEMPLATE.format(
-                question=question,
-                correct_answer=ground_truth,
-                response=response
+                question=question, correct_answer=ground_truth, response=response
             )
             judge_create_params.input = [
                 NeMoGymEasyInputMessage(
@@ -395,13 +396,15 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
             http_response = await self.server_client.post(
                 server_name=self.config.judge_model_server.name,
                 url_path="/v1/responses",
-                json=judge_create_params,   
+                json=judge_create_params,
             )
             judge_response = NeMoGymResponse.model_validate(await http_response.json())
-            return judge_create_params, judge_response   
+            return judge_create_params, judge_response
 
-        def _grade_sample(judge_create_params: NeMoGymResponseCreateParamsNonStreaming, judge_response: NeMoGymResponse) -> JudgeEvaluation:
-            #Taken from: https://github.com/openai/simple-evals/blob/5e623c2b400af62a1278e23595f95b0853d7fe8a/browsecomp_eval.py#L79-L93
+        def _grade_sample(
+            judge_create_params: NeMoGymResponseCreateParamsNonStreaming, judge_response: NeMoGymResponse
+        ) -> JudgeEvaluation:
+            # Taken from: https://github.com/openai/simple-evals/blob/5e623c2b400af62a1278e23595f95b0853d7fe8a/browsecomp_eval.py#L79-L93
             grading_response = judge_response.output[-1].content[-1].text
             if self.config.debug:
                 print("\n\n grading_response \n\n")
@@ -414,7 +417,7 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
                 reasoning=grading_response,
                 extracted_final_answer=extracted_final_answer,
                 reward=reward,
-                judge_response=judge_response
+                judge_response=judge_response,
             )
 
         judge_create_params, judge_response = await _get_judge_response(question, ground_truth, response)
@@ -426,7 +429,7 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
         matches = re.findall(r"Answer:\s*(.*)\s*Confidence:", response, re.IGNORECASE)
 
         if matches:
-            answer = matches[-1].strip() # Get the last item in the list
+            answer = matches[-1].strip()  # Get the last item in the list
         else:
             answer = ""
         if self.config.debug:
@@ -438,13 +441,13 @@ class TavilySearchResourcesServer(SimpleResourcesServer):
             extracted_final_answer=answer,
             reward=reward,
             judge_response=None,
-        )   
+        )
 
     def _get_last_assistant_response(self, response: NeMoGymResponse) -> str:
         for output_item in response.output[::-1]:
             if output_item.type != "message":
                 continue
-            #if any content item is of type output_text, then return the text
+            # if any content item is of type output_text, then return the text
             for content_item in output_item.content:
                 if content_item.type == "output_text":
                     return content_item.text

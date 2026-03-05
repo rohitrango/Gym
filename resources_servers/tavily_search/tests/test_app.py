@@ -12,37 +12,34 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import json
 import os
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from pytest import approx, fixture
 
+
 _TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+
+from gpt_oss.tools.simple_browser.backend import BackendError
+from gpt_oss.tools.simple_browser.page_contents import PageContents
 
 from nemo_gym.config_types import ModelServerRef
 from nemo_gym.openai_utils import (
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
-    NeMoGymResponseOutputItem,
     NeMoGymResponseOutputMessage,
     NeMoGymResponseOutputText,
 )
 from nemo_gym.server_utils import ServerClient
 from resources_servers.tavily_search.app import (
     FindInPageRequest,
-    FindInPageResponse,
     ScrollPageRequest,
-    ScrollPageResponse,
     TavilySearchRequest,
     TavilySearchResourcesServer,
     TavilySearchResourcesServerConfig,
     TavilySearchVerifyRequest,
 )
-from gpt_oss.tools.simple_browser.backend import BackendError
-from gpt_oss.tools.simple_browser.page_contents import PageContents
 
 
 class TestApp:
@@ -63,9 +60,7 @@ class TestApp:
 
     @fixture
     def server(self, config: TavilySearchResourcesServerConfig) -> TavilySearchResourcesServer:
-        return TavilySearchResourcesServer(
-            config=config, server_client=MagicMock(spec=ServerClient)
-        )
+        return TavilySearchResourcesServer(config=config, server_client=MagicMock(spec=ServerClient))
 
     def _msg(self, text: str) -> NeMoGymResponseOutputMessage:
         """Helper to create a NeMoGymResponseOutputMessage."""
@@ -110,9 +105,7 @@ class TestApp:
     # ---- Sanity ----
 
     def test_sanity(self, config: TavilySearchResourcesServerConfig) -> None:
-        TavilySearchResourcesServer(
-            config=config, server_client=MagicMock(spec=ServerClient)
-        )
+        TavilySearchResourcesServer(config=config, server_client=MagicMock(spec=ServerClient))
 
     # ---- _postprocess_search_results ----
 
@@ -158,7 +151,7 @@ class TestApp:
             "answer": "The capital of France is Paris.",
             "results": [
                 {"url": "https://example.com", "title": "T", "content": "C"},
-            ]
+            ],
         }
         formatted = server._postprocess_search_results(raw_results)
         joined = "".join(formatted)
@@ -219,9 +212,7 @@ class TestApp:
             ]
         }
         mock_backend = MagicMock()
-        mock_backend._tavily_post = AsyncMock(
-            side_effect=[BackendError("rate limited"), good_response]
-        )
+        mock_backend._tavily_post = AsyncMock(side_effect=[BackendError("rate limited"), good_response])
         server._backend = mock_backend
 
         request = TavilySearchRequest(query="test query")
@@ -233,9 +224,7 @@ class TestApp:
     async def test_web_search_max_retries_exceeded(self, server: TavilySearchResourcesServer) -> None:
         """Test that web_search returns empty after max retries."""
         mock_backend = MagicMock()
-        mock_backend._tavily_post = AsyncMock(
-            side_effect=BackendError("server error")
-        )
+        mock_backend._tavily_post = AsyncMock(side_effect=BackendError("server error"))
         server._backend = mock_backend
 
         request = TavilySearchRequest(query="test query")
@@ -321,9 +310,7 @@ class TestApp:
         """Test find_in_page retries on BackendError."""
         mock_page = self._make_page_contents(text="Content here", url="https://example.com")
         mock_backend = MagicMock()
-        mock_backend.fetch = AsyncMock(
-            side_effect=[BackendError("server error"), mock_page]
-        )
+        mock_backend.fetch = AsyncMock(side_effect=[BackendError("server error"), mock_page])
         server._backend = mock_backend
 
         request = FindInPageRequest(url="https://example.com", query="test")
@@ -337,9 +324,7 @@ class TestApp:
     async def test_scroll_page(self, server: TavilySearchResourcesServer) -> None:
         """Test scroll_page endpoint with mocked backend.fetch()."""
         page_text = " ".join([f"word{i}" for i in range(100)])
-        mock_page = self._make_page_contents(
-            text=page_text, url="https://example.com/article"
-        )
+        mock_page = self._make_page_contents(text=page_text, url="https://example.com/article")
         mock_backend = MagicMock()
         mock_backend.fetch = AsyncMock(return_value=mock_page)
         server._backend = mock_backend
@@ -358,16 +343,14 @@ class TestApp:
     async def test_scroll_page_caching(self, server: TavilySearchResourcesServer) -> None:
         """Test that scroll_page caches page content."""
         page_text = " ".join([f"word{i}" for i in range(100)])
-        mock_page = self._make_page_contents(
-            text=page_text, url="https://example.com/cached"
-        )
+        mock_page = self._make_page_contents(text=page_text, url="https://example.com/cached")
         mock_backend = MagicMock()
         mock_backend.fetch = AsyncMock(return_value=mock_page)
         server._backend = mock_backend
 
         # First call — should fetch
         request = ScrollPageRequest(url="https://example.com/cached", start_index=0, n=50)
-        response1 = await server.scroll_page(request)
+        await server.scroll_page(request)
         assert mock_backend.fetch.call_count == 1
 
         # Second call — should use cache, NOT call fetch again
@@ -397,9 +380,7 @@ class TestApp:
         page_text = "some content words here"
         mock_page = self._make_page_contents(text=page_text, url="https://example.com")
         mock_backend = MagicMock()
-        mock_backend.fetch = AsyncMock(
-            side_effect=[BackendError("timeout"), mock_page]
-        )
+        mock_backend.fetch = AsyncMock(side_effect=[BackendError("timeout"), mock_page])
         server._backend = mock_backend
 
         request = ScrollPageRequest(url="https://example.com", start_index=0, n=100)

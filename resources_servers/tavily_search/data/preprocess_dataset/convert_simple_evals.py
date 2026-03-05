@@ -1,9 +1,10 @@
-import json
 import copy
+import json
 import os
-import sys
 import random
 from pathlib import Path
+
+
 # Add parent directory to path so we can import from app.py
 
 random.seed(42)
@@ -26,16 +27,11 @@ TOOLS = [
         "description": "Search the web for a query and return up to 10 search results with <link, summary> for each result.",
         "parameters": {
             "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The term to search for"
-                }
-            },
+            "properties": {"query": {"type": "string", "description": "The term to search for"}},
             "required": ["query"],
-            "additionalProperties": False
+            "additionalProperties": False,
         },
-        "strict": False
+        "strict": False,
     }
 ]
 
@@ -121,9 +117,11 @@ You are encouraged to use the tools provided to you to solve the problem, to mak
 - scroll_page(url, start_index=0, n=2000): Retrieve the full content of a web page and return a window of n words starting at start_index. Use this to read through a page's content. You can paginate by increasing start_index. The response includes total_words so you know how much content is available.
 """
 
+
 def read_jsonl_file(file_path):
-    with open(file_path, 'r') as file:
+    with open(file_path, "r") as file:
         return [json.loads(line) for line in file]
+
 
 def update_system_prompt(input_messages: list) -> list:
     """Replace/append the system message with the new SYSTEM_PROMPT."""
@@ -133,11 +131,15 @@ def update_system_prompt(input_messages: list) -> list:
             break
     else:
         # No system message found -- prepend one
-        input_messages.insert(0, {
-            "role": "system",
-            "content": SYSTEM_PROMPT.strip(),
-        })
+        input_messages.insert(
+            0,
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT.strip(),
+            },
+        )
     return input_messages
+
 
 def add_tools_to_dataset(input_path: Path, output_path: Path, skip_system_prompt: bool = False) -> None:
     """Read input JSONL, append new tools to each record, write output JSONL."""
@@ -179,12 +181,12 @@ def add_tools_to_dataset(input_path: Path, output_path: Path, skip_system_prompt
     print(f"  Input:  {input_path}")
     print(f"  Output: {output_path}")
     if skip_system_prompt:
-        print(f"  System prompt update: SKIPPED")
+        print("  System prompt update: SKIPPED")
     else:
-        print(f"  System prompt update: appended new-tool guidance")
+        print("  System prompt update: appended new-tool guidance")
+
 
 def map_sft_sample_to_rl_sample(sft_sample):
-
     def set_question_in_query_template(messages):
         assert len(messages) >= 2
         question = messages[1]["content"]
@@ -206,58 +208,45 @@ def map_sft_sample_to_rl_sample(sft_sample):
         return messages[1]["content"]
 
     # def reformat_tools(tools):
-        # new_tools = []
-        # for tool in tools:
-        #     new_tools.append({
-        #         "type": "function",
-        #         **tool["function"]
-        #     })
-        #     new_tools[-1]["parameters"]["required"] = new_tools[-1]["parameters"].get("required", ["query"])
-        #     new_tools[-1]["parameters"]["additionalProperties"] = False
-        #     new_tools[-1]["strict"] = False #got 422 error without this.
-        # return new_tools
-
+    # new_tools = []
+    # for tool in tools:
+    #     new_tools.append({
+    #         "type": "function",
+    #         **tool["function"]
+    #     })
+    #     new_tools[-1]["parameters"]["required"] = new_tools[-1]["parameters"].get("required", ["query"])
+    #     new_tools[-1]["parameters"]["additionalProperties"] = False
+    #     new_tools[-1]["strict"] = False #got 422 error without this.
+    # return new_tools
 
     messages_with_system_prompt_and_question = strip_messages_to_no_asst(sft_sample["messages"])
     question = get_question(messages_with_system_prompt_and_question)
 
     messages_with_system_prompt_and_question = update_system_prompt(messages_with_system_prompt_and_question)
 
-    responses_create_params = {
-        "input": messages_with_system_prompt_and_question,
-        "tools": ALL_TOOLS
-    }
+    responses_create_params = {"input": messages_with_system_prompt_and_question, "tools": ALL_TOOLS}
 
     return {
         "responses_create_params": responses_create_params,
         "ground_truth": sft_sample["metadata"]["final_answer_entity"],
-        "question": question
+        "question": question,
     }
 
 
 def map_benchmark_sample_to_rl_sample(benchmark_sample):
-
     messages = [
-        {
-            "role": "system",
-            "content": SYSTEM_PROMPT.strip()
-        },
-        {
-            "role": "user",
-            "content": QUERY_TEMPLATE.format(Question=benchmark_sample["problem"])
-        }
+        {"role": "system", "content": SYSTEM_PROMPT.strip()},
+        {"role": "user", "content": QUERY_TEMPLATE.format(Question=benchmark_sample["problem"])},
     ]
 
-    responses_create_params = {
-        "input": messages,
-        "tools": ALL_TOOLS
-    }
+    responses_create_params = {"input": messages, "tools": ALL_TOOLS}
 
     return {
         "responses_create_params": responses_create_params,
         "ground_truth": benchmark_sample["answer"],
-        "question": benchmark_sample["problem"]
+        "question": benchmark_sample["problem"],
     }
+
 
 def test_final_sample(sample):
     required_keys = ["responses_create_params", "ground_truth", "question"]
@@ -266,17 +255,21 @@ def test_final_sample(sample):
             raise ValueError(f"Key {key} not found in sample")
     return sample
 
-def write_benchmark_samples(rl_samples, output_data_folder, completed_test_set_file_name, n_100_file_name, n_30_file_name):
+
+def write_benchmark_samples(
+    rl_samples, output_data_folder, completed_test_set_file_name, n_100_file_name, n_30_file_name
+):
     random.shuffle(rl_samples)
     with open(os.path.join(output_data_folder, completed_test_set_file_name), "w") as file:
         for rl_sample in rl_samples:
-                file.write(json.dumps(rl_sample) + "\n")
+            file.write(json.dumps(rl_sample) + "\n")
     with open(os.path.join(output_data_folder, n_100_file_name), "w") as file:
         for rl_sample in rl_samples[:100]:
-                file.write(json.dumps(rl_sample) + "\n")
+            file.write(json.dumps(rl_sample) + "\n")
     with open(os.path.join(output_data_folder, n_30_file_name), "w") as file:
         for rl_sample in rl_samples[:30]:
             file.write(json.dumps(rl_sample) + "\n")
+
 
 def write_train_validation_samples(rl_samples, output_data_folder, train_file_name, validation_file_name):
     random.shuffle(rl_samples)
@@ -287,8 +280,8 @@ def write_train_validation_samples(rl_samples, output_data_folder, train_file_na
         for rl_sample in rl_samples[-100:]:
             file.write(json.dumps(rl_sample) + "\n")
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     INPUT_DIR = Path(
         "/lustre/fsw/portfolios/llmservice/users/rgala/repos/abhibha-browsecomp"
         "/nemo-gym/resources_servers/tavily_search/data/benchmark/browsecomp"
