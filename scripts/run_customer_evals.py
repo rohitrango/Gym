@@ -24,21 +24,24 @@ responses_api_models/openai_model/configs/openai_model.yaml"
 ng_prepare_data "+config_paths=[$config_paths]" \
     +output_dirpath=data/cohesity_netbackup_rag \
     +mode=train_preparation \
-    +should_download=true
+    +should_download=true \
+    +data_source=gitlab
 
 config_paths="resources_servers/crowdstrike_logscale_syntax/configs/crowdstrike_logscale_syntax.yaml,\
 responses_api_models/openai_model/configs/openai_model.yaml"
 ng_prepare_data "+config_paths=[$config_paths]" \
     +output_dirpath=data/crowdstrike_logscale_syntax \
     +mode=train_preparation \
-    +should_download=true
+    +should_download=true \
+    +data_source=gitlab
 
 config_paths="resources_servers/servicenow_document_reasoning/configs/servicenow_document_reasoning.yaml,\
 responses_api_models/openai_model/configs/openai_model.yaml"
 ng_prepare_data "+config_paths=[$config_paths]" \
     +output_dirpath=data/servicenow_document_reasoning \
     +mode=train_preparation \
-    +should_download=true
+    +should_download=true \
+    +data_source=gitlab
 ```
 
 # Run
@@ -217,7 +220,7 @@ MODEL_EVAL_CONFIGS: List[ModelEvalConfig] = [
         },
     ),
     ModelEvalConfig(
-        model_short_name_for_upload="qwen3-next-80b-a3b-thinking",
+        model_short_name_for_upload="qwen3-next-80b-a3b-thinking-inference-nvidia",
         initial_global_config_dict={
             "policy_base_url": "https://integrate.api.nvidia.com/v1",
             "policy_api_key": "???",
@@ -496,6 +499,326 @@ nvidia/Nemotron-Nano-3-30B-A3.5B-dev-1024 \
             },
         },
         spinup_command=r"""""",
+    ),
+    ModelEvalConfig(
+        model_short_name_for_upload="nvidia-nemotron-nano-v3",
+        initial_global_config_dict={
+            "policy_base_url": "???",
+            "policy_api_key": "???",
+            "policy_model_name": "nvidia/nemotron-nano-v3",
+            "config_paths": [
+                "responses_api_models/vllm_model/configs/vllm_model.yaml",
+            ],
+            "policy_model": {
+                "responses_api_models": {
+                    "vllm_model": {
+                        "replace_developer_role_with_system": False,
+                        "uses_reasoning_parser": True,
+                    },
+                },
+            },
+        },
+        spinup_command=r"""""",
+    ),
+    ModelEvalConfig(
+        model_short_name_for_upload="gpt-oss-120b-reasoning-low",
+        initial_global_config_dict={
+            "policy_base_url": "???",
+            "policy_api_key": "???",
+            "policy_model_name": "openai/gpt-oss-120b",
+            "config_paths": [
+                "responses_api_models/openai_model/configs/openai_model.yaml",
+            ],
+            "responses_create_params": {
+                "reasoning": {
+                    "effort": "low",
+                },
+                # From https://huggingface.co/openai/gpt-oss-120b/discussions/21#6892bbe3342676ebf6ba7428
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "max_output_tokens": 131072,
+            },
+        },
+        spinup_command=r"""HF_HUB_OFFLINE=1 \
+HF_HOME=.cache/ \
+HOME=. \
+vllm serve \
+    openai/gpt-oss-120b \
+    --dtype auto \
+    --tensor-parallel-size 8 \
+    --gpu-memory-utilization 0.9 \
+    --enable-auto-tool-choice --tool-call-parser openai \
+    --host 0.0.0.0 \
+    --port 10240""",
+    ),
+    ModelEvalConfig(
+        model_short_name_for_upload="gpt-oss-120b-reasoning-medium",
+        initial_global_config_dict={
+            "policy_base_url": "???",
+            "policy_api_key": "???",
+            "policy_model_name": "openai/gpt-oss-120b",
+            "config_paths": [
+                "responses_api_models/openai_model/configs/openai_model.yaml",
+            ],
+            "responses_create_params": {
+                "reasoning": {
+                    "effort": "medium",
+                },
+                # From https://huggingface.co/openai/gpt-oss-120b/discussions/21#6892bbe3342676ebf6ba7428
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "max_output_tokens": 131072,
+            },
+        },
+        spinup_command=r"""HF_HUB_OFFLINE=1 \
+HF_HOME=.cache/ \
+HOME=. \
+vllm serve \
+    openai/gpt-oss-120b \
+    --dtype auto \
+    --tensor-parallel-size 8 \
+    --gpu-memory-utilization 0.9 \
+    --enable-auto-tool-choice --tool-call-parser openai \
+    --host 0.0.0.0 \
+    --port 10240""",
+    ),
+    ModelEvalConfig(
+        model_short_name_for_upload="gpt-oss-120b-reasoning-high",
+        initial_global_config_dict={
+            "policy_base_url": "???",
+            "policy_api_key": "???",
+            "policy_model_name": "openai/gpt-oss-120b",
+            "config_paths": [
+                "responses_api_models/openai_model/configs/openai_model.yaml",
+            ],
+            "responses_create_params": {
+                "reasoning": {
+                    "effort": "high",
+                },
+                # From https://huggingface.co/openai/gpt-oss-120b/discussions/21#6892bbe3342676ebf6ba7428
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "max_output_tokens": 131072,
+            },
+        },
+        spinup_command=r"""HF_HUB_OFFLINE=1 \
+HF_HOME=.cache/ \
+HOME=. \
+vllm serve \
+    openai/gpt-oss-120b \
+    --dtype auto \
+    --tensor-parallel-size 8 \
+    --gpu-memory-utilization 0.9 \
+    --enable-auto-tool-choice --tool-call-parser openai \
+    --host 0.0.0.0 \
+    --port 10240""",
+    ),
+    ModelEvalConfig(
+        model_short_name_for_upload="nvidia-nemotron-super-v3-aurora-core",
+        initial_global_config_dict={
+            "policy_base_url": "???",
+            "policy_api_key": "???",
+            "policy_model_name": "nvidia/nemotron-super-v3",
+            "config_paths": [
+                "responses_api_models/vllm_model/configs/vllm_model.yaml",
+            ],
+            "policy_model": {
+                "responses_api_models": {
+                    "vllm_model": {
+                        "replace_developer_role_with_system": False,
+                        "uses_reasoning_parser": True,
+                        "sequential_reasoning_allowed": False,
+                    },
+                },
+            },
+            "responses_create_params": {
+                "temperature": 1.0,
+                "top_p": 0.95,
+                "max_output_tokens": 131072,
+            },
+        },
+        spinup_command=r"""""",
+    ),
+    ModelEvalConfig(
+        model_short_name_for_upload="qwen3-next-80b-a3b-thinking",
+        initial_global_config_dict={
+            "policy_base_url": "???",
+            "policy_api_key": "???",
+            "policy_model_name": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+            "config_paths": [
+                "responses_api_models/vllm_model/configs/vllm_model.yaml",
+            ],
+            "policy_model": {
+                "responses_api_models": {
+                    "vllm_model": {
+                        "replace_developer_role_with_system": True,
+                        "uses_reasoning_parser": True,
+                    },
+                },
+            },
+            # https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Thinking#best-practices
+            "responses_create_params": {
+                "temperature": 0.6,
+                "top_p": 0.95,
+            },
+        },
+        spinup_command=r"""HF_HUB_OFFLINE=1 \
+HF_HOME=.cache/ \
+HOME=. \
+vllm serve \
+    Qwen/Qwen3-Next-80B-A3B-Thinking \
+    --dtype auto \
+    --tensor-parallel-size 8 \
+    --gpu-memory-utilization 0.9 \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes \
+    --reasoning-parser deepseek_r1 \
+    --host 0.0.0.0 \
+    --port 10240""",
+    ),
+    ModelEvalConfig(
+        model_short_name_for_upload="qwen3-next-80b-a3b-instruct",
+        initial_global_config_dict={
+            "policy_base_url": "???",
+            "policy_api_key": "???",
+            "policy_model_name": "Qwen/Qwen3-Next-80B-A3B-Instruct",
+            "config_paths": [
+                "responses_api_models/vllm_model/configs/vllm_model.yaml",
+            ],
+            "policy_model": {
+                "responses_api_models": {
+                    "vllm_model": {
+                        "replace_developer_role_with_system": True,
+                        "uses_reasoning_parser": False,
+                    },
+                },
+            },
+            # https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct#best-practices
+            "responses_create_params": {
+                "temperature": 0.7,
+                "top_p": 0.8,
+            },
+        },
+        spinup_command=r"""HF_HUB_OFFLINE=1 \
+HF_HOME=.cache/ \
+HOME=. \
+vllm serve \
+    Qwen/Qwen3-Next-80B-A3B-Instruct \
+    --dtype auto \
+    --tensor-parallel-size 8 \
+    --gpu-memory-utilization 0.9 \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes \
+    --host 0.0.0.0 \
+    --port 10240""",
+    ),
+    ModelEvalConfig(
+        model_short_name_for_upload="qwen3.5-27b",
+        initial_global_config_dict={
+            "policy_base_url": "???",
+            "policy_api_key": "???",
+            "policy_model_name": "Qwen/Qwen3.5-27B",
+            "config_paths": [
+                "responses_api_models/vllm_model/configs/vllm_model.yaml",
+            ],
+            "policy_model": {
+                "responses_api_models": {
+                    "vllm_model": {
+                        "replace_developer_role_with_system": True,
+                        "uses_reasoning_parser": True,
+                    },
+                },
+            },
+            # https://huggingface.co/Qwen/Qwen3.5-27B#using-qwen35-via-the-chat-completions-api
+            "responses_create_params": {
+                "temperature": 1.0,
+                "top_p": 0.95,
+                "max_output_tokens": 131072,
+            },
+        },
+        spinup_command=r"""vllm serve Qwen/Qwen3.5-27B \
+    --trust-remote-code \
+    --tensor-parallel-size 8 \
+    --gpu-memory-utilization 0.9 \
+    --enable-prefix-caching \
+    --reasoning-parser qwen3 \
+    --tool-call-parser qwen3_coder \
+    --enable-auto-tool-choice \
+    --host 0.0.0.0 \
+    --port 10240 \
+    --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 96}'""",
+    ),
+    ModelEvalConfig(
+        model_short_name_for_upload="qwen3.5-35b-a3b",
+        initial_global_config_dict={
+            "policy_base_url": "???",
+            "policy_api_key": "???",
+            "policy_model_name": "Qwen/Qwen3.5-35B-A3B",
+            "config_paths": [
+                "responses_api_models/vllm_model/configs/vllm_model.yaml",
+            ],
+            "policy_model": {
+                "responses_api_models": {
+                    "vllm_model": {
+                        "replace_developer_role_with_system": True,
+                        "uses_reasoning_parser": True,
+                    },
+                },
+            },
+            # https://huggingface.co/Qwen/Qwen3.5-35B-A3B#using-qwen35-via-the-chat-completions-api
+            "responses_create_params": {
+                "temperature": 1.0,
+                "top_p": 0.95,
+                "max_output_tokens": 131072,
+            },
+        },
+        spinup_command=r"""vllm serve Qwen/Qwen3.5-35B-A3B \
+    --trust-remote-code \
+    --tensor-parallel-size 8 \
+    --gpu-memory-utilization 0.9 \
+    --enable-prefix-caching \
+    --reasoning-parser qwen3 \
+    --tool-call-parser qwen3_coder \
+    --enable-auto-tool-choice \
+    --host 0.0.0.0 \
+    --port 10240 \
+    --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 96}'""",
+    ),
+    ModelEvalConfig(
+        model_short_name_for_upload="qwen3.5-122b-a10b",
+        initial_global_config_dict={
+            "policy_base_url": "???",
+            "policy_api_key": "???",
+            "policy_model_name": "Qwen/Qwen3.5-122B-A10B",
+            "config_paths": [
+                "responses_api_models/vllm_model/configs/vllm_model.yaml",
+            ],
+            "policy_model": {
+                "responses_api_models": {
+                    "vllm_model": {
+                        "replace_developer_role_with_system": True,
+                        "uses_reasoning_parser": True,
+                    },
+                },
+            },
+            # https://huggingface.co/Qwen/Qwen3.5-122B-A10B#using-qwen35-via-the-chat-completions-api
+            "responses_create_params": {
+                "temperature": 1.0,
+                "top_p": 0.95,
+                "max_output_tokens": 131072,
+            },
+        },
+        spinup_command=r"""vllm serve Qwen/Qwen3.5-122B-A10B \
+    --trust-remote-code \
+    --tensor-parallel-size 8 \
+    --gpu-memory-utilization 0.9 \
+    --enable-prefix-caching \
+    --reasoning-parser qwen3 \
+    --tool-call-parser qwen3_coder \
+    --enable-auto-tool-choice \
+    --host 0.0.0.0 \
+    --port 10240 \
+    --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 96}'""",
     ),
 ]
 
