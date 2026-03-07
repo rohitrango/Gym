@@ -22,6 +22,7 @@
 
 set -euo pipefail
 
+M4_VERSION="1.4.19"
 GMP_VERSION="6.3.0"
 BDB_VERSION="18.1.40"
 GNUCOBOL_VERSION="3.2"
@@ -37,12 +38,26 @@ echo "==> GnuCOBOL install prefix: ${PREFIX}"
 # -------------------------------------------------------------------
 # Pre-flight checks
 # -------------------------------------------------------------------
-for cmd in gcc make; do
+for cmd in gcc make tar; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "ERROR: '${cmd}' is required but not found on PATH." >&2
         exit 1
     fi
 done
+
+# xz is needed to extract .tar.xz archives (m4, GMP, GnuCOBOL)
+if ! command -v xz &>/dev/null; then
+    echo "ERROR: 'xz' is required to extract .tar.xz archives but not found." >&2
+    echo "       Install with: apt-get install xz-utils" >&2
+    exit 1
+fi
+
+# Verify gcc can actually produce executables (catches missing libc6-dev)
+if ! echo 'int main(){return 0;}' | gcc -x c - -o /dev/null 2>/dev/null; then
+    echo "ERROR: gcc cannot compile a simple program. Missing libc6-dev?" >&2
+    echo "       Install with: apt-get install libc6-dev  (or: apt-get install build-essential)" >&2
+    exit 1
+fi
 
 DOWNLOAD_CMD=""
 if command -v wget &>/dev/null; then
@@ -55,6 +70,30 @@ else
 fi
 
 mkdir -p "${PREFIX}" "${BUILD_DIR}"
+
+# -------------------------------------------------------------------
+# 0. m4 (only if not already installed — required by GMP)
+# -------------------------------------------------------------------
+if command -v m4 &>/dev/null; then
+    echo "==> m4 found ($(command -v m4)), skipping."
+elif [ -x "${PREFIX}/bin/m4" ]; then
+    echo "==> m4 already built locally, skipping."
+else
+    echo "==> m4 not found — building m4 ${M4_VERSION} from source ..."
+    cd "${BUILD_DIR}"
+    M4_ARCHIVE="m4-${M4_VERSION}.tar.xz"
+    if [ ! -f "${M4_ARCHIVE}" ]; then
+        $DOWNLOAD_CMD "${M4_ARCHIVE}" "https://ftp.gnu.org/gnu/m4/${M4_ARCHIVE}"
+    fi
+    tar xf "${M4_ARCHIVE}"
+    cd "m4-${M4_VERSION}"
+    ./configure --prefix="${PREFIX}" --quiet
+    make -j"$(nproc)" --quiet
+    make install --quiet
+    echo "==> m4 installed."
+fi
+# Ensure locally-built m4 is on PATH for GMP configure
+export PATH="${PREFIX}/bin:${PATH}"
 
 # -------------------------------------------------------------------
 # 1. GMP (GNU Multiple Precision Library)
@@ -71,8 +110,10 @@ else
     tar xf "${GMP_ARCHIVE}"
     cd "gmp-${GMP_VERSION}"
     ./configure --prefix="${PREFIX}" --quiet
-    make -j"$(nproc)" --quiet
-    make install --quiet
+    # MAKEINFO=true prevents make from trying to regenerate .info docs
+    # when container timestamps cause make to think .texi is newer.
+    make -j"$(nproc)" MAKEINFO=true --quiet
+    make install MAKEINFO=true --quiet
     echo "==> GMP installed."
 fi
 
@@ -122,8 +163,8 @@ else
         BDB_LIBS="-L${PREFIX}/lib -Wl,-rpath,${PREFIX}/lib -ldb" \
         --prefix="${PREFIX}" \
         --quiet
-    make -j"$(nproc)" --quiet
-    make install --quiet
+    make -j"$(nproc)" MAKEINFO=true --quiet
+    make install MAKEINFO=true --quiet
     echo "==> GnuCOBOL installed."
 fi
 
