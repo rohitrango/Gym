@@ -4,7 +4,7 @@ Detailed patterns, schemas, and code examples for adding benchmarks to NeMo-Gym.
 
 ## Table of Contents
 
-1. [Resource Server Pattern](#resource-server-pattern)
+1. [Resources Server Pattern](#resources-server-pattern)
 2. [YAML Config Pattern](#yaml-config-pattern)
 3. [JSONL Data Schema](#jsonl-data-schema)
 4. [Agent Patterns](#agent-patterns)
@@ -16,7 +16,7 @@ Detailed patterns, schemas, and code examples for adding benchmarks to NeMo-Gym.
 
 ---
 
-## Resource Server Pattern
+## Resources Server Pattern
 
 ### Minimal verify-only server (e.g. `example_single_tool_call`)
 
@@ -178,10 +178,10 @@ Add `.toolname/` to the server's `.gitignore`.
 
 ## YAML Config Pattern
 
-A single YAML file in `configs/` defines both the resource server and its agent pairing(s):
+A single YAML file in `configs/` defines both the resources server and its agent pairing(s):
 
 ```yaml
-# Resource server instance
+# Resources server instance
 my_benchmark:
   resources_servers:
     my_benchmark:                    # must match subdirectory name
@@ -285,7 +285,7 @@ Each line is a JSON object with this structure:
 - `responses_create_params.tools`: function tool definitions if the benchmark uses tool calls
 - `responses_create_params.temperature`, `max_output_tokens`, etc.
 - `verifier_metadata`: arbitrary dict passed through to `verify()`. Define whatever your benchmark needs.
-- Any other top-level fields — they pass through to the resource server via `BaseRunRequest`.
+- Any other top-level fields — they pass through to the resources server via `BaseRunRequest`.
 
 ### Data conversion
 
@@ -373,10 +373,14 @@ class MyAgent(SimpleResponsesAPIAgent):
 
 ### Key rules
 
-- Propagate cookies through every server call: `cookies=request.cookies`, then update with `response.cookies`
+- Propagate cookies through every server call: `cookies=request.cookies`, then update with `response.cookies`. This is critical for stateful environments that track per-task sessions.
 - Call `raise_for_status()` after every inter-server call
 - The agent calls itself (`self.config.name`) for `/v1/responses` to keep middleware chain intact
 - Use `ConfigDict(extra="allow")` on request/response models for flexible field forwarding
+- **Token ID propagation**: model responses include `prompt_token_ids`, `generation_token_ids`, and `generation_log_probs`. Propagate these from each model response into the next turn's input — required for RL training. See `swe_agents/app.py` for the implementation pattern.
+- **Monotonic trajectories**: NeMo RL requires the token sequence across multi-turn rollouts to only grow. Never summarize, truncate, or modify prior turns between steps.
+- **Thinking model compatibility**: thinking models emit `<think>`/`<thinking>` blocks. Strip these before parsing tool calls from model output, or parsing will break. See `harbor_agent` for the handling pattern.
+- **Concurrency control for external services**: if the agent calls external services (Docker containers, APIs), use `asyncio.Semaphore` to throttle concurrent calls — external services may not handle thousands of simultaneous requests.
 
 ---
 
@@ -440,7 +444,7 @@ def run_tests_remote(code, test_cases, timeout=30):
 
 ## Test Patterns
 
-### Resource server tests
+### Resources server tests
 
 ```python
 import shutil
@@ -473,7 +477,7 @@ Mock `server_client.post()` to simulate server responses without running actual 
 
 Conversion scripts and prompt files belong in the **source repo** (e.g. your dataset repository), not in NeMo-Gym. Only the converted JSONL files are uploaded to the GitLab dataset registry.
 
-**Exception**: When there is no external source repo, keep the conversion script in the resource server directory.
+**Exception**: When there is no external source repo, keep the conversion script in the resources server directory.
 
 Reference script template (for use in the source repo):
 
@@ -632,6 +636,42 @@ class ExternalBenchmarkAgent(SimpleResponsesAPIAgent):
 Add the dependency in `requirements.txt`. If needs are more complex than pip packages, use `setup.py` or `pyproject.toml`.
 
 Reproduction requirement: run the original repo first, reproduce published numbers, then integrate into Gym and reproduce again. This decouples Gym integration bugs from benchmark bugs.
+
+### Replacing httpx with aiohttp in external libraries
+
+Many external libraries use `httpx.AsyncClient` internally. NeMo Gym requires all async HTTP to go through its global aiohttp client (`nemo_gym.server_utils.request()`) because httpx/httpcore has O(n^2) connection pooling that causes hangs at high concurrency. See `docs/infrastructure/engineering-notes/aiohttp-vs-httpx.md`.
+
+When wrapping such a library, create an adapter class that mimics the library's expected HTTP interface but routes calls through aiohttp. The `tavily_search` resources server demonstrates this pattern:
+
+```python
+from nemo_gym.server_utils import request
+
+class AIOHTTPAdapter(BaseModel):
+    headers: Dict[str, str]
+    base_url: str
+
+    async def post(self, endpoint: str, content: str, **kwargs) -> AdapterResponse:
+        response = await request(
+            method="POST",
+            url=f"{self.base_url}{endpoint}",
+            headers=self.headers,
+            data=content,
+        )
+        return AdapterResponse(status_code=response.status, data=await response.json())
+
+    @classmethod
+    def from_httpx_client(cls, client: AsyncClient) -> "AIOHTTPAdapter":
+        return cls(headers=dict(client.headers), base_url=str(client.base_url))
+```
+
+Then in `model_post_init()`, replace the library's internal client:
+```python
+def model_post_init(self, context):
+    self._external_client = ExternalLibraryClient(api_key=key)
+    self._external_client._http_client = AIOHTTPAdapter.from_httpx_client(
+        self._external_client._http_client
+    )
+```
 
 ---
 
