@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-NvidiaProprietary
 #
 # NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
@@ -45,20 +45,20 @@ from pathlib import Path
 SEARCH_WEB_TOOL = {
     "type": "function",
     "name": "search_web",
-    "description": "Search the web for information. Pass 1-3 concise keyword-based queries.",
+    "strict": True,
+    "description": "Searches the web for current and factual information to answer user queries, returning relevant results with titles, URLs, and content snippets, similar to Google or Bing. Intended for questions about up-to-date or externally verified information beyond your knowledge cutoff. The tool works best with an array of short, keyword-focused queries. Complex queries that require multi-step reasoning are not supported. Time-sensitive queries are supported if the date is included in the query.\n\nBest practices for using this tool:\n- Limit the number of queries in each request to a maximum of three to maintain efficiency.\n- For multi-entity questions, break them into separate, single-entity queries:\n  - Preferred:\n    [\n      \"Brand A protein powder review\",\n      \"Brand B protein powder review\"\n    ]\n  - Not recommended:\n    [\n      \"Brand A vs Brand B protein powder review\"\n    ]\n\n- For simple queries, keep each query straightforward and focused:\n  - Preferred: [\"inflation rate Canada\"]\n  - Not recommended: [\"What is the inflation rate in Canada?\"]\n\nEach query should be short to ensure optimal tool performance. Make sure all provided examples and generated queries follow this guideline.",
     "parameters": {
         "type": "object",
         "properties": {
             "queries": {
                 "type": "array",
+                "description": "An array of keyword-based search queries. Each query should be short, as longer queries may reduce performance. Do not provide more than three queries to maintain efficiency.",
                 "items": {"type": "string"},
-                "description": "List of 1-3 search queries.",
             }
         },
         "required": ["queries"],
         "additionalProperties": False,
     },
-    "strict": True,
 }
 
 from resources_servers.perplexity_summarizer.prompts import (

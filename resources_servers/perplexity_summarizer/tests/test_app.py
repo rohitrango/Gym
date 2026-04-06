@@ -485,11 +485,15 @@ class TestApp:
     # Additional coverage tests
     # -------------------------------------------------------------------
 
-    async def test_verify_applies_judge_hparams(self, server):
-        """Judge hparam overrides from config are applied to the judge call."""
-        server.config.judge_temperature = 0.3
-        server.config.judge_top_p = 0.9
-        server.config.judge_max_output_tokens = 4096
+    async def test_verify_applies_judge_hparams(self, config):
+        """Judge hparams from judge_responses_create_params are passed to the judge call."""
+        config.judge_responses_create_params = NeMoGymResponseCreateParamsNonStreaming(
+            input=[],
+            temperature=0.3,
+            top_p=0.9,
+            max_output_tokens=4096,
+        )
+        server = PerplexitySearchResourcesServer(config=config, server_client=MagicMock(spec=ServerClient))
 
         judge_text = "reasoning: Good answer.\n\nfollowed: yes"
         post_mock = MagicMock()

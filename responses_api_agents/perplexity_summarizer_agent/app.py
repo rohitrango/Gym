@@ -1,12 +1,4 @@
-"""
-Perplexity summarizer agent.
-
-A custom agent with tool-call-limited loop: counts actual tool calls (not loop
-steps) and sets tool_choice="none" when the limit is reached, forcing the model
-to produce a final text response.
-"""
-
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-NvidiaProprietary
 #
 # NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
@@ -15,6 +7,14 @@ to produce a final text response.
 # disclosure or distribution of this material and related documentation
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
+"""
+Perplexity summarizer agent.
+
+A custom agent with tool-call-limited loop: counts actual tool calls (not loop
+steps) and sets tool_choice="none" when the limit is reached, forcing the model
+to produce a final text response.
+"""
+
 import json
 from typing import List, Optional
 
