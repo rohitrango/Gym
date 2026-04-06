@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-NvidiaProprietary
 #
 # NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
@@ -50,10 +50,6 @@ class PerplexitySearchConfig(BaseResourcesServerConfig):
     judge_model_server: ModelServerRef
     judge_responses_create_params: NeMoGymResponseCreateParamsNonStreaming
     judge_endpoint_max_concurrency: Optional[int] = 64
-    judge_temperature: Optional[float] = None
-    judge_top_p: Optional[float] = None
-    judge_max_output_tokens: Optional[int] = None
-    judge_reasoning_effort: Optional[str] = "medium"
 
 
 class PerplexitySearchRequest(BaseRunRequest):
@@ -90,50 +86,30 @@ class SearchWebResponse(BaseModel):
     search_results: str
 
 
-def _parse_judge_output(raw_output: str, dataset_name: str) -> Optional[JudgeResult]:
-    """Parse judge output — supports free-text and JSON fallback.
+def _parse_judge_output(raw_output: str, dataset_name: str) -> JudgeResult:
+    """Parse judge free-text output, matching the perplexity scaffold's parsing logic.
 
-    IF datasets (user_if, abstention): look for "followed: yes/no".
-    Correctness datasets (frames, facts, etc.): look for "correct: yes/no".
-    Falls back to JSON parsing if free-text patterns aren't found.
+    IF datasets (user_if, abstention): extract "followed: yes/no" (case-insensitive).
+    Correctness datasets (frames, facts): extract "correct: yes/no" (case-sensitive).
     """
     text = raw_output.strip()
 
-    # Try free-text patterns first
     if get_judge_type(dataset_name) == "if":
         match = re.search(r"followed:\s*(yes|no)", text, re.IGNORECASE)
-        if match:
-            followed = match.group(1).lower() == "yes"
-            return JudgeResult(correct=1 if followed else 0, reasoning=text, failure_mode=None)
-
-    match = re.search(r"correct:\s*(yes|no)", text, re.IGNORECASE)
-    if match:
-        correct = match.group(1).lower() == "yes"
-        return JudgeResult(correct=1 if correct else 0, reasoning=text, failure_mode=None)
-
-    # JSON fallback — handle ```json``` code blocks and raw JSON
-    json_text = text
-    if "```json" in json_text:
-        start = json_text.find("```json") + 7
-        end = json_text.find("```", start)
-        if end > start:
-            json_text = json_text[start:end].strip()
-    elif "```" in json_text:
-        start = json_text.find("```") + 3
-        end = json_text.find("```", start)
-        if end > start:
-            json_text = json_text[start:end].strip()
-    try:
-        parsed = json.loads(json_text)
+        followed = match.group(1).lower() == "yes" if match else False
         return JudgeResult(
-            correct=int(parsed.get("correct", 0)),
-            reasoning=str(parsed.get("reasoning", text)),
-            failure_mode=parsed.get("failure_mode"),
+            correct=1 if followed else 0,
+            reasoning=text,
+            failure_mode=None if match else "could not parse 'followed:' from judge output",
         )
-    except (json.JSONDecodeError, ValueError, TypeError):
-        pass
 
-    return JudgeResult(correct=0, reasoning=text, failure_mode="could not parse judge output")
+    match = re.search(r"correct: (yes|no)", text)
+    correct = match.group(1).lower() == "yes" if match else False
+    return JudgeResult(
+        correct=1 if correct else 0,
+        reasoning=text,
+        failure_mode=None if match else "could not parse 'correct:' from judge output",
+    )
 
 
 class PerplexitySearchResourcesServer(SimpleResourcesServer):
@@ -257,14 +233,6 @@ class PerplexitySearchResourcesServer(SimpleResourcesServer):
     async def _call_judge(self, prompt: str) -> Optional[str]:
         cfg = self.config
         params = cfg.judge_responses_create_params.model_copy(deep=True)
-        if cfg.judge_temperature is not None:
-            params.temperature = cfg.judge_temperature
-        if cfg.judge_top_p is not None:
-            params.top_p = cfg.judge_top_p
-        if cfg.judge_max_output_tokens is not None:
-            params.max_output_tokens = cfg.judge_max_output_tokens
-        if cfg.judge_reasoning_effort is not None:
-            params.reasoning = {"effort": cfg.judge_reasoning_effort}
         params.input = [
             NeMoGymEasyInputMessage(role="user", content=prompt),
         ]

@@ -17,10 +17,9 @@ perplexity_summarizer_resources_server:
         name: perplexity_summarizer_judge_model
       judge_responses_create_params:
         input: []
-      judge_temperature: null
-      judge_top_p: null
-      judge_max_output_tokens: 32768
-      judge_reasoning_effort: medium
+        max_output_tokens: 32768
+        reasoning:
+          effort: medium
       judge_endpoint_max_concurrency: 64
 
 perplexity_summarizer_judge_model:
@@ -32,6 +31,7 @@ perplexity_summarizer_judge_model:
       model: ${judge_model_name}
       return_token_id_information: false
       uses_reasoning_parser: true
+      is_responses_native: true
 
 perplexity_summarizer:
   responses_api_agents:
@@ -47,16 +47,16 @@ perplexity_summarizer:
       bad_words:
       - "<tool_call>"
       - "</tool_call>"
-      temperature: 1.0
+      temperature: 0.6
       top_p: 1.0
-      max_output_tokens: 32768
+      max_output_tokens: 8192
       datasets:
       - name: perplexity_abstention
         type: validation
         jsonl_fpath: resources_servers/perplexity_summarizer/data/perplexity_abstention.jsonl
         gitlab_identifier:
           dataset_name: perplexity_abstention
-          version: 0.0.2
+          version: 0.0.4
           artifact_fpath: perplexity_abstention.jsonl
         license: "NVIDIA Internal Use Only, Do Not Distribute"
       - name: perplexity_abstention_example

@@ -9,5 +9,5 @@ policy_model:
       uses_reasoning_parser: true
       sequential_reasoning_allowed: true
       chat_template_kwargs:
-        enable_thinking: true
+        enable_thinking: false
       extra_body: {}
