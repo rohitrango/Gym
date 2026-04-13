@@ -202,20 +202,18 @@ def convert_perplexity_facts_grounding_hf(row: dict, idx: int) -> dict:
     """Convert a HuggingFace FACTS-grounding row.
 
     Schema: system_instruction, user_request, context_document, full_prompt.
-    The user_request is the query, and context_document is the ground truth
-    that the model's answer must be grounded in.
+    The user_request is the query sent to the model. The context_document is
+    used only as ground truth for grading — NOT included in the model input.
+    This matches lotus's SingleFactEval which sends only the question and
+    expects the model to use search_web to find the answer.
     """
     user_request = row.get("user_request", row.get("prompt", ""))
     context_document = row.get("context_document", row.get("ground_truth", ""))
-    # Build the user prompt: include context document so model can ground its answer
-    user_content = user_request
-    if context_document:
-        user_content = f"{user_request}\n\n<context_document>\n{context_document}\n</context_document>"
     return {
         "responses_create_params": {
             "input": [
                 {"role": "system", "content": SYSTEM_PROMPT_PERPLEXITY_FACTS_GROUNDING, "type": "message"},
-                {"role": "user", "content": user_content, "type": "message"},
+                {"role": "user", "content": user_request, "type": "message"},
             ],
             "tools": [SEARCH_WEB_TOOL],
         },
@@ -226,6 +224,22 @@ def convert_perplexity_facts_grounding_hf(row: dict, idx: int) -> dict:
     }
 
 
+def convert_perplexity_language_mismatch(row: dict, idx: int) -> dict:
+    """Convert a perplexity_language_mismatch raw row. Preserves full pre-baked trajectory."""
+    messages = row["messages"]
+    query_text = row.get("question", _extract_first_user_query(messages))
+    return {
+        "responses_create_params": {
+            "input": _messages_to_input(messages),
+            "tools": [SEARCH_WEB_TOOL],
+        },
+        "dataset_name": "perplexity_language_mismatch",
+        "example_id": f"perplexity_language_mismatch_{idx:04d}",
+        "query": query_text,
+        "instruction": row.get("instruction"),
+    }
+
+
 CONVERTERS = {
     "perplexity_user_if": convert_perplexity_user_if,
     "perplexity_search": convert_perplexity_search,
@@ -233,6 +247,7 @@ CONVERTERS = {
     "perplexity_abstention": convert_perplexity_abstention,
     "perplexity_frames": convert_perplexity_frames_hf,
     "perplexity_facts_grounding": convert_perplexity_facts_grounding_hf,
+    "perplexity_language_mismatch": convert_perplexity_language_mismatch,
 }
 
 

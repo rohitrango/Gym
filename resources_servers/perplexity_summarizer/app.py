@@ -43,6 +43,8 @@ class PerplexitySearchConfig(BaseResourcesServerConfig):
     search_rate_limit_qps: Optional[int] = None
     max_search_results: int = 10
     max_tokens_per_page: int = 500
+    use_nv_search: bool = False
+    pplx_search_url: str = ""
 
     judge_type: Literal["llm", "reward_model"] = "llm"
     reward_model_server: Optional[ModelServerRef] = None
@@ -129,6 +131,7 @@ class PerplexitySearchResourcesServer(SimpleResourcesServer):
             else nullcontext()
         )
         self._perplexity_client = None
+        self._aiohttp_session = None
 
     def _get_perplexity_client(self):
         if self._perplexity_client is None:
@@ -137,34 +140,73 @@ class PerplexitySearchResourcesServer(SimpleResourcesServer):
             self._perplexity_client = AsyncPerplexity(api_key=self.config.perplexity_api_key)
         return self._perplexity_client
 
+    async def _get_aiohttp_session(self):
+        if self._aiohttp_session is None or self._aiohttp_session.closed:
+            import aiohttp
+            self._aiohttp_session = aiohttp.ClientSession()
+        return self._aiohttp_session
+
+    async def _search_nv_inference(self, queries: list[str]) -> list[dict]:
+        """Call NV Inference search endpoint."""
+        session = await self._get_aiohttp_session()
+        async with session.post(
+            self.config.pplx_search_url,
+            headers={
+                "Authorization": f"Bearer {self.config.perplexity_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"query": queries, "max_results": self.config.max_search_results},
+        ) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+        results = data.get("results", [])
+        return [
+            {
+                "id": f"web:{i}",
+                "url": r.get("url", ""),
+                "title": r.get("title", ""),
+                "content": r.get("snippet", ""),
+            }
+            for i, r in enumerate(results)
+        ]
+
     def setup_webserver(self) -> FastAPI:
         app = super().setup_webserver()
         app.post("/search_web")(self.search_web)
+
+        @app.on_event("shutdown")
+        async def _cleanup_aiohttp():
+            if self._aiohttp_session and not self._aiohttp_session.closed:
+                await self._aiohttp_session.close()
+
         return app
 
     async def search_web(self, body: SearchWebRequest) -> SearchWebResponse:
         if not body.queries:
             return SearchWebResponse(search_results="[]")
-        client = self._get_perplexity_client()
         try:
             async with self._search_semaphore:
                 if self._search_rate_limiter is not None:
                     await self._search_rate_limiter.acquire()
-                response = await client.search.create(
-                    query=body.queries,
-                    max_results=self.config.max_search_results,
-                    max_tokens_per_page=self.config.max_tokens_per_page,
-                )
-            results = response.results if isinstance(response.results, list) else [response.results]
-            parsed = [
-                {
-                    "id": f"web:{i}",
-                    "url": getattr(r, "url", ""),
-                    "title": getattr(r, "title", ""),
-                    "content": getattr(r, "snippet", ""),
-                }
-                for i, r in enumerate(results)
-            ]
+                if self.config.use_nv_search:
+                    parsed = await self._search_nv_inference(body.queries)
+                else:
+                    client = self._get_perplexity_client()
+                    response = await client.search.create(
+                        query=body.queries,
+                        max_results=self.config.max_search_results,
+                        max_tokens_per_page=self.config.max_tokens_per_page,
+                    )
+                    results = response.results if isinstance(response.results, list) else [response.results]
+                    parsed = [
+                        {
+                            "id": f"web:{i}",
+                            "url": getattr(r, "url", ""),
+                            "title": getattr(r, "title", ""),
+                            "content": getattr(r, "snippet", ""),
+                        }
+                        for i, r in enumerate(results)
+                    ]
             return SearchWebResponse(search_results=json.dumps(parsed))
         except Exception as e:
             logging.warning("search error: %s %s", type(e).__name__, e)

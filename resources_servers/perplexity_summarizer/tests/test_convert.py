@@ -14,6 +14,7 @@ from resources_servers.perplexity_summarizer.preprocess_to_gym import (
     convert_perplexity_chat,
     convert_perplexity_facts_grounding_hf,
     convert_perplexity_frames_hf,
+    convert_perplexity_language_mismatch,
     convert_perplexity_search,
     convert_perplexity_user_if,
 )
@@ -138,11 +139,10 @@ class TestConvertPerplexityFactsGroundingHF:
         result = convert_perplexity_facts_grounding_hf(row, 1)
         assert result["dataset_name"] == "perplexity_facts_grounding"
         assert result["query"] == "What are my risk factors for dementia?"
+        # Context document is used as ground truth for grading, NOT in the model input
         assert result["ground_truth"] == "High blood pressure increases dementia risk."
-        # Context document should be embedded in the user prompt
         user_content = result["responses_create_params"]["input"][1]["content"]
-        assert "<context_document>" in user_content
-        assert "High blood pressure" in user_content
+        assert user_content == "What are my risk factors for dementia?"
 
     def test_fallback_keys(self):
         """Fallback to prompt/ground_truth keys if HF schema differs."""
@@ -150,3 +150,49 @@ class TestConvertPerplexityFactsGroundingHF:
         result = convert_perplexity_facts_grounding_hf(row, 1)
         assert result["query"] == "Test?"
         assert result["ground_truth"] == "Answer."
+
+
+class TestConvertPerplexityLanguageMismatch:
+    def test_basic_conversion(self):
+        row = {
+            "messages": [
+                {"role": "system", "content": "System prompt here"},
+                {"role": "user", "content": "Quel est le plus grand océan du monde?"},
+            ],
+            "question": "Quel est le plus grand océan du monde?",
+            "instruction": "The primary language of the answer must match the primary language of the question.",
+        }
+        result = convert_perplexity_language_mismatch(row, 1)
+        assert result["dataset_name"] == "perplexity_language_mismatch"
+        assert result["example_id"] == "perplexity_language_mismatch_0001"
+        assert result["query"] == "Quel est le plus grand océan du monde?"
+        assert result["instruction"] == "The primary language of the answer must match the primary language of the question."
+        assert len(result["responses_create_params"]["tools"]) == 1
+        assert result["responses_create_params"]["tools"][0]["name"] == "search_web"
+
+    def test_preserves_trajectory(self):
+        """Pre-baked tool calls are converted to Responses API format."""
+        row = {
+            "messages": [
+                {"role": "system", "content": "Sys"},
+                {"role": "user", "content": "Cuál es la capital de Australia?"},
+                {"role": "assistant", "content": "Voy a buscar...", "tool_calls": [
+                    {"id": "call_1", "function": {"name": "search_web", "arguments": '{"queries": ["capital of Australia"]}'}}
+                ]},
+                {"role": "tool", "content": "Results...", "tool_call_id": "call_1"},
+            ],
+            "question": "Cuál es la capital de Australia?",
+            "instruction": "The primary language of the answer must match the primary language of the question.",
+        }
+        result = convert_perplexity_language_mismatch(row, 1)
+        inputs = result["responses_create_params"]["input"]
+        assert len(inputs) == 5  # system, user, assistant text, function_call, function_call_output
+        assert inputs[0] == {"role": "system", "content": "Sys", "type": "message"}
+        assert inputs[1] == {"role": "user", "content": "Cuál es la capital de Australia?", "type": "message"}
+        assert inputs[2] == {"role": "assistant", "content": "Voy a buscar...", "type": "message"}
+        assert inputs[3]["type"] == "function_call"
+        assert inputs[3]["name"] == "search_web"
+        assert inputs[3]["call_id"] == "call_1"
+        assert inputs[4]["type"] == "function_call_output"
+        assert inputs[4]["call_id"] == "call_1"
+        assert inputs[4]["output"] == "Results..."

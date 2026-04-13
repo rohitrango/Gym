@@ -7,6 +7,8 @@ perplexity_summarizer_resources_server:
       description: Search-augmented QA with Perplexity Search API and LLM-as-a-judge
       value: Improve factual grounding with search augmentation
       perplexity_api_key: ${perplexity_api_key}
+      use_nv_search: true
+      pplx_search_url: ${pplx_search_url}
       search_max_concurrency: 20
       search_rate_limit_qps: 45
       max_search_results: 10
@@ -17,6 +19,7 @@ perplexity_summarizer_resources_server:
         name: perplexity_summarizer_judge_model
       judge_responses_create_params:
         input: []
+        temperature: 0.0
       judge_endpoint_max_concurrency: 64
 
 perplexity_summarizer_judge_model:
@@ -28,7 +31,9 @@ perplexity_summarizer_judge_model:
       model: ${judge_model_name}
       return_token_id_information: false
       uses_reasoning_parser: true
-      is_responses_native: true
+      is_responses_native: false
+      extra_body:
+        seed: 0
 
 perplexity_summarizer:
   responses_api_agents:
@@ -53,7 +58,7 @@ perplexity_summarizer:
         jsonl_fpath: resources_servers/perplexity_summarizer/data/perplexity_facts_grounding.jsonl
         gitlab_identifier:
           dataset_name: perplexity_facts_grounding
-          version: 0.0.4
+          version: 0.0.5
           artifact_fpath: perplexity_facts_grounding.jsonl
         license: "NVIDIA Internal Use Only, Do Not Distribute"
       - name: perplexity_facts_grounding_example
