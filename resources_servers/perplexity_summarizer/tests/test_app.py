@@ -407,6 +407,7 @@ class TestApp:
         assert get_judge_type("perplexity_chat") == "correctness"
         assert get_judge_type("perplexity_frames") == "correctness"
         assert get_judge_type("perplexity_facts_grounding") == "correctness"
+        assert get_judge_type("perplexity_language_mismatch") == "if"
 
     def test_format_judge_prompt_user_if(self):
         prompt = format_judge_prompt(

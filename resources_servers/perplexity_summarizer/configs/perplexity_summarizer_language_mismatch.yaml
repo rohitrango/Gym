@@ -5,10 +5,8 @@ perplexity_summarizer_resources_server:
       domain: agent
       verified: false
       description: Search-augmented QA with Perplexity Search API and LLM-as-a-judge
-      value: Improve multi-hop reasoning with search augmentation
+      value: Improve search-augmented QA across multiple evaluation dimensions
       perplexity_api_key: ${perplexity_api_key}
-      use_nv_search: true
-      pplx_search_url: ${pplx_search_url}
       search_max_concurrency: 20
       search_rate_limit_qps: 45
       max_search_results: 10
@@ -19,7 +17,9 @@ perplexity_summarizer_resources_server:
         name: perplexity_summarizer_judge_model
       judge_responses_create_params:
         input: []
-        temperature: 0.0
+        max_output_tokens: 32768
+        reasoning:
+          effort: medium
       judge_endpoint_max_concurrency: 64
 
 perplexity_summarizer_judge_model:
@@ -31,9 +31,7 @@ perplexity_summarizer_judge_model:
       model: ${judge_model_name}
       return_token_id_information: false
       uses_reasoning_parser: true
-      is_responses_native: false
-      extra_body:
-        seed: 0
+      is_responses_native: true
 
 perplexity_summarizer:
   responses_api_agents:
@@ -45,7 +43,7 @@ perplexity_summarizer:
       model_server:
         type: responses_api_models
         name: policy_model
-      max_tool_calls: 3
+      max_tool_calls: 0
       bad_words:
       - "<tool_call>"
       - "</tool_call>"
@@ -53,14 +51,14 @@ perplexity_summarizer:
       top_p: 1.0
       max_output_tokens: 8192
       datasets:
-      - name: perplexity_frames
+      - name: perplexity_language_mismatch
         type: validation
-        jsonl_fpath: resources_servers/perplexity_summarizer/data/perplexity_frames.jsonl
+        jsonl_fpath: resources_servers/perplexity_summarizer/data/perplexity_language_mismatch.jsonl
         gitlab_identifier:
-          dataset_name: perplexity_frames
-          version: 0.0.5
-          artifact_fpath: perplexity_frames.jsonl
+          dataset_name: perplexity_language_mismatch
+          version: 0.0.1
+          artifact_fpath: perplexity_language_mismatch.jsonl
         license: "NVIDIA Internal Use Only, Do Not Distribute"
-      - name: perplexity_frames_example
+      - name: perplexity_language_mismatch_example
         type: example
-        jsonl_fpath: resources_servers/perplexity_summarizer/data/perplexity_frames_example.jsonl
+        jsonl_fpath: resources_servers/perplexity_summarizer/data/perplexity_language_mismatch_example.jsonl

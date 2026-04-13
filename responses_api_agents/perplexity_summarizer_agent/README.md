@@ -6,18 +6,19 @@ Search-augmented QA evaluation agent for Perplexity summarizer models. Implement
 
 | Dataset | Eval Focus | Rollout Type | max_tool_calls | Judge |
 |---------|-----------|-------------|----------------|-------|
-| perplexity_user_if | Instruction following | Pre-baked trajectory | 0 | LLM (followed: yes/no) |
+| perplexity_user_if | Instruction following | Pre-baked trajectory | 0 | LLM IF (followed: yes/no) |
+| perplexity_abstention | Abstention behavior | Pre-baked trajectory | 0 | LLM IF (followed: yes/no) |
+| perplexity_language_mismatch | Language consistency | Pre-baked trajectory | 0 | LLM IF (followed: yes/no) |
 | perplexity_search | Search quality | Pre-baked trajectory | 0 | Reward model (not yet implemented) |
 | perplexity_chat | Chat quality (no tools) | Pre-baked trajectory | 0 | Reward model (not yet implemented) |
-| perplexity_abstention | Abstention behavior | Pre-baked trajectory | 0 | LLM (followed: yes/no) |
-| perplexity_frames | Multi-hop reasoning | Fresh rollout | 3 | LLM (correct: yes/no) |
-| perplexity_facts_grounding | Factual grounding | Fresh rollout | 3 | LLM (correct: yes/no) |
+| perplexity_frames | Multi-hop reasoning | Fresh rollout | 3 | LLM correctness (correct: yes/no) |
+| perplexity_facts_grounding | Factual grounding | Fresh rollout | 3 | LLM correctness (correct: yes/no) |
 
 ## How It Works
 
 ### Pre-baked Trajectories
 
-Datasets like `perplexity_user_if`, `perplexity_search`, `perplexity_chat`, and `perplexity_abstention` use pre-baked trajectories. The model receives a full conversation including prior tool calls and results, then generates only the final summary. `max_tool_calls=0` forces `tool_choice="none"` from the start.
+Datasets like `perplexity_user_if`, `perplexity_abstention`, `perplexity_language_mismatch`, `perplexity_search`, and `perplexity_chat` use pre-baked trajectories. The model receives a full conversation including prior tool calls and results, then generates only the final summary. `max_tool_calls=0` forces `tool_choice="none"` from the start.
 
 ### Fresh Rollouts
 
@@ -35,11 +36,11 @@ Once the tool-call limit is reached, three layers prevent the model from making 
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|
-| temperature | 1.0 | Set per-dataset in YAML |
+| temperature | 0.6 | Set per-dataset in YAML |
 | top_p | 1.0 | Set per-dataset in YAML |
-| max_output_tokens | 32768 | Set per-dataset in YAML |
+| max_output_tokens | 8192 | Set per-dataset in YAML |
 | bad_words | `["<tool_call>", "</tool_call>"]` | vLLM-specific, applied when tool_choice="none" |
-| enable_thinking | true | Set in agent config (policy model) |
+| enable_thinking | false | Set in policy model config, override via CLI |
 
 ## Configuration
 
