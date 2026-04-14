@@ -42,6 +42,17 @@ ng_prepare_data "+config_paths=[$config_paths]" \
     +mode=train_preparation \
     +should_download=true \
     +data_source=gitlab
+
+# Dassault tool-calling benchmarks (enterprise, scaled, multistep)
+config_paths="resources_servers/dassault_tool_call_enterprise/configs/dassault_tool_call_enterprise.yaml,\
+resources_servers/dassault_tool_call_scaled/configs/dassault_tool_call_scaled.yaml,\
+resources_servers/dassault_tool_call_multistep/configs/dassault_tool_call_multistep.yaml,\
+responses_api_models/openai_model/configs/openai_model.yaml"
+ng_prepare_data "+config_paths=[$config_paths]" \
+    +output_dirpath=data/dassault_tool_call \
+    +mode=train_preparation \
+    +should_download=true \
+    +data_source=gitlab
 ```
 
 # Run
@@ -109,6 +120,33 @@ CUSTOMER_EVALS: List[CustomerEval] = [
             agent_name="servicenow_document_reasoning_simple_agent",
             input_jsonl_fpath="data/servicenow_document_reasoning/validation.jsonl",
             output_jsonl_fpath="resources_servers/servicenow_document_reasoning/data/{model_short_name_for_upload}_validation_rollouts.jsonl",
+        ),
+    ),
+    CustomerEval(
+        eval_name="dassault_tool_call_enterprise",
+        config_path="resources_servers/dassault_tool_call_enterprise/configs/dassault_tool_call_enterprise.yaml",
+        rollout_collection_config=RolloutCollectionConfig(
+            agent_name="dassault_tool_call_enterprise_simple_agent",
+            input_jsonl_fpath="resources_servers/dassault_tool_call_enterprise/data/enterprise.jsonl",
+            output_jsonl_fpath="resources_servers/dassault_tool_call_enterprise/data/{model_short_name_for_upload}_enterprise_rollouts.jsonl",
+        ),
+    ),
+    CustomerEval(
+        eval_name="dassault_tool_call_scaled",
+        config_path="resources_servers/dassault_tool_call_scaled/configs/dassault_tool_call_scaled.yaml",
+        rollout_collection_config=RolloutCollectionConfig(
+            agent_name="dassault_tool_call_scaled_simple_agent",
+            input_jsonl_fpath="resources_servers/dassault_tool_call_scaled/data/scaled.jsonl",
+            output_jsonl_fpath="resources_servers/dassault_tool_call_scaled/data/{model_short_name_for_upload}_scaled_rollouts.jsonl",
+        ),
+    ),
+    CustomerEval(
+        eval_name="dassault_tool_call_multistep",
+        config_path="resources_servers/dassault_tool_call_multistep/configs/dassault_tool_call_multistep.yaml",
+        rollout_collection_config=RolloutCollectionConfig(
+            agent_name="dassault_tool_call_multistep_simple_agent",
+            input_jsonl_fpath="resources_servers/dassault_tool_call_multistep/data/multistep.jsonl",
+            output_jsonl_fpath="resources_servers/dassault_tool_call_multistep/data/{model_short_name_for_upload}_multistep_rollouts.jsonl",
         ),
     ),
 ]
