@@ -15,9 +15,26 @@
 
 [project]
 name = "local-vllm-model"
-dynamic = ["dependencies"]
 version = "0.2.0rc0"
 requires-python = ">=3.12"
+dependencies = [
+    "nemo-gym[dev]",
+
+    # Custom vllm fork with ultra-rl patches (same branch as NeMo RL's 3rdparty/vllm).
+    # Requires VLLM_PRECOMPILED_WHEEL_LOCATION env var for fast builds.
+    # License: Apache 2.0 https://github.com/vllm-project/vllm/blob/89988ec8c2a0c3e18e63767d9df5ca8f6b8ff21c/LICENSE
+    "vllm @ git+https://github.com/TomerBN-Nvidia/vllm.git@ultra-rl-v0.17",
+
+    # FlashInfer packages from the ultra-rl fork. All three must be from the same fork
+    # to avoid kernel ABI mismatches (e.g. trtllm_fp8_block_scale_moe arg count differs
+    # between fork 0.6.5 and stock PyPI 0.6.4).
+    # flashinfer-python must be explicit to override vllm's transitive dep on PyPI flashinfer.
+    # flashinfer-jit-cache requires FLASHINFER_CUDA_ARCH_LIST env var at build time.
+    "flashinfer-cubin",
+    "flashinfer-jit-cache==0.6.5+cu129",
+    "flashinfer-python",
+    "quack-kernels==0.3.6",
+]
 
 [build-system]
 build-backend = "setuptools.build_meta"
@@ -29,6 +46,31 @@ include = ["local_vllm_model"]
 
 [tool.uv.sources]
 nemo-gym = { path = "../..", editable = true }
+torch = [{ index = "pytorch-cu129" }]
+torchvision = [{ index = "pytorch-cu129" }]
+triton = [{ index = "pytorch-cu129" }]
+flashinfer-cubin = [ { index = "flashinfer-internal-pypi" } ]
+flashinfer-jit-cache = [ { index = "flashinfer-internal-pypi" } ]
+flashinfer-python = { git = "https://github.com/TomerBN-Nvidia/flashinfer.git", rev = "ultra-rl" }
 
-[tool.uv.pip]
-torch-backend = "auto"
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[[tool.uv.index]]
+name = "flashinfer-internal-pypi"
+url = "https://gitlab-master.nvidia.com/api/v4/projects/65523/packages/pypi/simple"
+explicit = true
+
+[tool.uv]
+# Universal resolution otherwise includes darwin splits where vLLM pins torch==2.10.0+cpu (unpublished
+# / unsatisfiable for those markers). This project targets Linux + CUDA only.
+environments = ["sys_platform == 'linux'"]
+override-dependencies = [
+    "flashinfer-python",
+    "torch==2.10.0",
+    "torchaudio==2.10.0",
+    "torchvision==0.25.0",
+]
+extra-build-variables = { vllm = { VLLM_PRECOMPILED_WHEEL_LOCATION="https://github.com/vllm-project/vllm/releases/download/v0.17.0/vllm-0.17.0-cp38-abi3-manylinux_2_31_aarch64.whl" } }

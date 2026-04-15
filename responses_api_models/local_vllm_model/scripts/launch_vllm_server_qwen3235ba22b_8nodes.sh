@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # ----- PARAMETERS -----
-# EXP_NAME, NUM_ACTOR_NODES, REPO_LOCATION, CONTAINER_IMAGE_PATH, SLURM_ACCOUNT, SLURM_PARTITION
+# WANDB_API_KEY, EXP_NAME, NUM_ACTOR_NODES, REPO_LOCATION, CONTAINER_IMAGE_PATH, SLURM_ACCOUNT, SLURM_PARTITION
 
 # ray.sub needs to be launched from the NeMo-RL root directory
 cd $REPO_LOCATION
@@ -28,10 +28,13 @@ cd 3rdparty/Gym-workspace/Gym
 source .venv/bin/activate
 
 ng_run "+config_paths=[responses_api_models/local_vllm_model/configs/qwen3_235b_a22b_instruct_2507.yaml]" \
-    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.model=Qwen/Qwen3-30B-A3B-Instruct-2507 \
-    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.vllm_serve_kwargs.tensor_parallel_size=4 \
-    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.vllm_serve_kwargs.data_parallel_size=16 \
-    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.vllm_serve_kwargs.data_parallel_size_local=2 \
+    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.vllm_serve_kwargs.tensor_parallel_size=8 \
+    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.vllm_serve_kwargs.pipeline_parallel_size=1 \
+    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.vllm_serve_kwargs.data_parallel_size=8 \
+    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.vllm_serve_kwargs.data_parallel_size_local=1 \
+    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.vllm_serve_kwargs.model_loader_extra_config.num_threads=128 \
+    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.vllm_serve_kwargs.max_num_seqs=100 \
+    ++qwen3_235b_a22b_instruct_2507_model_server.responses_api_models.local_vllm_model.debug=true \
     ++use_absolute_ip=true
 
 EOF

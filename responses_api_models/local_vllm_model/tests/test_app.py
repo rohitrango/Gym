@@ -72,5 +72,6 @@ class TestApp:
             )
 
             get_cache_dir = LocalVLLMModel.get_cache_dir
+            get_hf_token = LocalVLLMModel.get_hf_token
 
         LocalVLLMModel._configure_vllm_serve(DummyLocalVLLMModel())
