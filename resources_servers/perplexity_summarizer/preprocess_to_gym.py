@@ -46,7 +46,7 @@ SEARCH_WEB_TOOL = {
     "type": "function",
     "name": "search_web",
     "strict": True,
-    "description": "Searches the web for current and factual information to answer user queries, returning relevant results with titles, URLs, and content snippets, similar to Google or Bing. Intended for questions about up-to-date or externally verified information beyond your knowledge cutoff. The tool works best with an array of short, keyword-focused queries. Complex queries that require multi-step reasoning are not supported. Time-sensitive queries are supported if the date is included in the query.\n\nBest practices for using this tool:\n- Limit the number of queries in each request to a maximum of three to maintain efficiency.\n- For multi-entity questions, break them into separate, single-entity queries:\n  - Preferred:\n    [\n      \"Brand A protein powder review\",\n      \"Brand B protein powder review\"\n    ]\n  - Not recommended:\n    [\n      \"Brand A vs Brand B protein powder review\"\n    ]\n\n- For simple queries, keep each query straightforward and focused:\n  - Preferred: [\"inflation rate Canada\"]\n  - Not recommended: [\"What is the inflation rate in Canada?\"]\n\nEach query should be short to ensure optimal tool performance. Make sure all provided examples and generated queries follow this guideline.",
+    "description": 'Searches the web for current and factual information to answer user queries, returning relevant results with titles, URLs, and content snippets, similar to Google or Bing. Intended for questions about up-to-date or externally verified information beyond your knowledge cutoff. The tool works best with an array of short, keyword-focused queries. Complex queries that require multi-step reasoning are not supported. Time-sensitive queries are supported if the date is included in the query.\n\nBest practices for using this tool:\n- Limit the number of queries in each request to a maximum of three to maintain efficiency.\n- For multi-entity questions, break them into separate, single-entity queries:\n  - Preferred:\n    [\n      "Brand A protein powder review",\n      "Brand B protein powder review"\n    ]\n  - Not recommended:\n    [\n      "Brand A vs Brand B protein powder review"\n    ]\n\n- For simple queries, keep each query straightforward and focused:\n  - Preferred: ["inflation rate Canada"]\n  - Not recommended: ["What is the inflation rate in Canada?"]\n\nEach query should be short to ensure optimal tool performance. Make sure all provided examples and generated queries follow this guideline.',
     "parameters": {
         "type": "object",
         "properties": {
@@ -98,18 +98,22 @@ def _messages_to_input(messages: list[dict]) -> list[dict]:
                 arguments = fn.get("arguments", "")
                 if isinstance(arguments, dict):
                     arguments = json.dumps(arguments, ensure_ascii=False)
-                items.append({
-                    "type": "function_call",
-                    "name": fn.get("name", ""),
-                    "arguments": arguments,
-                    "call_id": tc.get("id", ""),
-                })
+                items.append(
+                    {
+                        "type": "function_call",
+                        "name": fn.get("name", ""),
+                        "arguments": arguments,
+                        "call_id": tc.get("id", ""),
+                    }
+                )
         elif role == "tool":
-            items.append({
-                "type": "function_call_output",
-                "call_id": msg.get("tool_call_id", ""),
-                "output": content,
-            })
+            items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": msg.get("tool_call_id", ""),
+                    "output": content,
+                }
+            )
     return items
 
 

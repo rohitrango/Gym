@@ -143,6 +143,7 @@ class PerplexitySearchResourcesServer(SimpleResourcesServer):
     async def _get_aiohttp_session(self):
         if self._aiohttp_session is None or self._aiohttp_session.closed:
             import aiohttp
+
             self._aiohttp_session = aiohttp.ClientSession()
         return self._aiohttp_session
 
