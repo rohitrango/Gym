@@ -44,9 +44,13 @@ class TestConvertPerplexityUserIf:
             "messages": [
                 {"role": "system", "content": "Sys"},
                 {"role": "user", "content": "Query"},
-                {"role": "assistant", "content": "I will search...", "tool_calls": [
-                    {"id": "call_1", "function": {"name": "search_web", "arguments": '{"queries": ["test"]}'}}
-                ]},
+                {
+                    "role": "assistant",
+                    "content": "I will search...",
+                    "tool_calls": [
+                        {"id": "call_1", "function": {"name": "search_web", "arguments": '{"queries": ["test"]}'}}
+                    ],
+                },
                 {"role": "tool", "content": "Results...", "tool_call_id": "call_1"},
             ],
             "question": "Query",
@@ -166,7 +170,10 @@ class TestConvertPerplexityLanguageMismatch:
         assert result["dataset_name"] == "perplexity_language_mismatch"
         assert result["example_id"] == "perplexity_language_mismatch_0001"
         assert result["query"] == "Quel est le plus grand océan du monde?"
-        assert result["instruction"] == "The primary language of the answer must match the primary language of the question."
+        assert (
+            result["instruction"]
+            == "The primary language of the answer must match the primary language of the question."
+        )
         assert len(result["responses_create_params"]["tools"]) == 1
         assert result["responses_create_params"]["tools"][0]["name"] == "search_web"
 
@@ -176,9 +183,16 @@ class TestConvertPerplexityLanguageMismatch:
             "messages": [
                 {"role": "system", "content": "Sys"},
                 {"role": "user", "content": "Cuál es la capital de Australia?"},
-                {"role": "assistant", "content": "Voy a buscar...", "tool_calls": [
-                    {"id": "call_1", "function": {"name": "search_web", "arguments": '{"queries": ["capital of Australia"]}'}}
-                ]},
+                {
+                    "role": "assistant",
+                    "content": "Voy a buscar...",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "function": {"name": "search_web", "arguments": '{"queries": ["capital of Australia"]}'},
+                        }
+                    ],
+                },
                 {"role": "tool", "content": "Results...", "tool_call_id": "call_1"},
             ],
             "question": "Cuál es la capital de Australia?",
