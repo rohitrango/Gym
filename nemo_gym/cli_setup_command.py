@@ -137,9 +137,7 @@ def setup_env_command(dir_path: Path, global_config_dict: DictConfig, prefix: st
             )
         elif has_pyproject_toml:
             if is_editable_install:
-                install_cmd = (
-                    f"""uv pip install {verbose_flag}{uv_pip_python_flag}'-e .' {" ".join(head_server_deps)}"""
-                )
+                install_cmd = f"""uv lock && uv sync --active && uv pip install {verbose_flag}{uv_pip_python_flag}{" ".join(head_server_deps)}"""
             else:
                 # install nemo-gym from pypi instead of relative path in pyproject.toml
                 # with support for pre-releases, custom indexes, and version pinning
