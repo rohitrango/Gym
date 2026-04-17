@@ -44,7 +44,7 @@ class CompCodingResourcesServerConfig(BaseResourcesServerConfig):
     num_processes: int
     unit_test_timeout_secs: int
     debug: bool
-    reasoning_format_penalty: float = -0.2
+    reasoning_format_penalty: float = 0.0
 
 
 # ----------------------------
