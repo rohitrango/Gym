@@ -1,0 +1,75 @@
+gym_v_resources_server:
+  resources_servers:
+    gym_v:
+      entrypoint: app.py
+      domain: games
+      verified: false
+      description: "Env-id-parametric wrapper around any gym_v.Env (Path B)."
+      # Deprecated compatibility path. Path B uses stateless /seed_session:
+      # text_action_agent forwards the manifest row supplied by the trainer.
+      task_jsonl_fpaths: []
+      image_format: "PNG"
+      image_jpeg_quality: 90
+      skip_images: false
+      enforce_horizon_cap: true
+      return_transitions: false
+      disable_text_feedback: true
+gym_v_agent:
+  responses_api_agents:
+    text_action_agent:
+      entrypoint: app.py
+      resources_server:
+        type: resources_servers
+        name: gym_v_resources_server
+      model_server:
+        type: responses_api_models
+        name: policy_model
+      # Reduced from Doc 2's nominal 64. FrozenLake (4x4 default board) is
+      # solvable in ~6 turns optimally and ~10-12 with backtracking; if a
+      # rollout hasn't found the goal in 16 turns it's wandering or stuck
+      # in a cycle. The unbounded long tail (one rollout grinding 60+ turns)
+      # was responsible for the asyncio deadlock at ~50% completion in job
+      # 11728180. 16 turns still gives Doc 2's per-turn `\boxed{}` extraction
+      # enough samples to be meaningful while tightly bounding worst-case
+      # wall-clock per rollout.
+      max_steps: 16
+      # Per Doc 2 R5: kill the rollout the moment the model fails to emit a
+      # `\boxed{...}` action. Without this we waste turns on the model just
+      # rambling, which both inflates wall-clock and makes the per-turn
+      # `fmt-match` metric noisy (a single bad turn gets retried up to
+      # `max_steps` times).
+      done_if_no_boxed_answer: true    # Doc 2 R5
+      return_transitions: false        # Doc 1 R3
+      # NOTE: `max_total_sequence_length` was originally
+      # `${policy.max_total_sequence_length}`, but NeMo-Gym loads this YAML
+      # in its own OmegaConf context where `policy.*` does not resolve.
+      # See sister gym_v.yaml for the same explanation; same fix applies.
+      # Re-emit a format-reminder user message AFTER each env-state observation
+      # (turn 1 included). Necessary because gym-v's per-turn obs text contains
+      # its own action-format hint (e.g. FrozenLake's "Type your action as:
+      # [up], [down], [left], [right]") which would otherwise win on recency
+      # over the system prompt's `\boxed{...}` instruction. Verified
+      # empirically in job 11729628 (V0 baseline): 0/128 rollouts produced
+      # `\boxed{...}` because the env's bracketed hint imprinted on the model.
+      # V_SystemReminder probe: re-enabled with the reminder role flipped to
+      # `system` (in text_action_agent/app.py's _maybe_inject_rules_summary).
+      # Job 11732200 (role=user) showed the reminder leaked into the model's
+      # output as a structured template (rollout 13). Job 11732812
+      # (re_emit=false) is the no-reminder baseline. This run tests whether
+      # a system-role reminder gets the recency benefit without inviting
+      # the model to imitate it.
+      re_emit_rules_each_turn: true    # Doc 2 R5
+      # Path-B-specific reminder. Placed AFTER the env's per-turn obs text by
+      # `_maybe_inject_rules_summary` (see text_action_agent/app.py).
+      # Intentionally:
+      # - env-agnostic (no "[up] for FrozenLake, grid for GoL" — job 11731385
+      #   showed that causes cross-env action contamination);
+      # - terse and non-template-y (long imperative sentences in the prior
+      #   verbose form caused 3/32 rollouts in 11732200 to regurgitate the
+      #   reminder text as fake structured output);
+      # - uses "=>" instead of ":" to look unlike a labeled training example.
+      rules_summary_template: "Final action format => \\boxed{...} on the last line. Wrap whatever the env's text above specifies."
+      datasets:
+        - name: example
+          type: example
+          jsonl_fpath: data/all_example_tasks_path_b.jsonl

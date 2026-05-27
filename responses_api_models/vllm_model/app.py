@@ -12,9 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import hashlib
 import json
+import logging
+import os
 import re
 from copy import deepcopy
+from pathlib import Path
 from time import time
 from typing import Any, ClassVar, Dict, List, Optional, Tuple, Union
 from uuid import uuid4
@@ -37,6 +41,7 @@ from nemo_gym.openai_utils import (
     NeMoGymChatCompletionCreateParamsNonStreaming,
     NeMoGymChatCompletionDeveloperMessageParam,
     NeMoGymChatCompletionMessage,
+    NeMoGymChatCompletionMessageForTraining,
     NeMoGymChatCompletionMessageParam,
     NeMoGymChatCompletionMessageToolCallFunctionParam,
     NeMoGymChatCompletionMessageToolCallParam,
@@ -64,11 +69,145 @@ from nemo_gym.openai_utils import (
 from nemo_gym.server_utils import SESSION_ID_KEY, is_nemo_gym_fastapi_entrypoint
 
 
+LOGGER = logging.getLogger(__name__)
+
+
+def _debug_jsonl_path(component: str) -> Optional[Path]:
+    debug_dir = os.environ.get("NEMO_RL_DEBUG_RESPONSES_PIPELINE_DIR")
+    if not debug_dir:
+        return None
+    path = Path(debug_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    return path / f"{component}.jsonl"
+
+
+def _preview_text(value: Any, limit: int = 500) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value)
+    return text if len(text) <= limit else text[:limit] + f"...<truncated {len(text) - limit} chars>"
+
+
+def _seq_summary(values: Any, *, limit: int = 12) -> Dict[str, Any]:
+    if values is None:
+        return {"present": False, "len": 0}
+    if not isinstance(values, list):
+        return {"present": True, "type": type(values).__name__}
+    return {
+        "present": True,
+        "len": len(values),
+        "head": values[:limit],
+        "tail": values[-limit:] if len(values) > limit else [],
+    }
+
+
+def _image_url_summary(image_url: Any) -> Dict[str, Any]:
+    if isinstance(image_url, dict):
+        image_url = image_url.get("url")
+    if not isinstance(image_url, str):
+        return {"present": False, "type": type(image_url).__name__}
+    return {
+        "present": True,
+        "len": len(image_url),
+        "sha256_16": hashlib.sha256(image_url.encode("utf-8")).hexdigest()[:16],
+        "prefix": image_url[:32],
+    }
+
+
+def _content_summary(content: Any) -> Any:
+    if isinstance(content, str):
+        return {"kind": "str", "len": len(content), "preview": _preview_text(content)}
+    if not isinstance(content, list):
+        return {"kind": type(content).__name__, "repr": _preview_text(content)}
+    parts = []
+    for part in content:
+        if not isinstance(part, dict):
+            parts.append({"kind": type(part).__name__, "repr": _preview_text(part)})
+            continue
+        part_type = part.get("type")
+        summary = {"type": part_type, "keys": sorted(part.keys())}
+        if "text" in part:
+            text = part.get("text")
+            summary["text_len"] = len(text) if isinstance(text, str) else None
+            summary["text_preview"] = _preview_text(text)
+        if "image_url" in part:
+            summary["image_url"] = _image_url_summary(part.get("image_url"))
+        parts.append(summary)
+    return {"kind": "list", "len": len(content), "parts": parts}
+
+
+def _message_summary(message: Any) -> Dict[str, Any]:
+    if hasattr(message, "model_dump"):
+        message = message.model_dump()
+    if not isinstance(message, dict):
+        return {"type": type(message).__name__, "repr": _preview_text(message)}
+    return {
+        "keys": sorted(message.keys()),
+        "role": message.get("role"),
+        "type": message.get("type"),
+        "content": _content_summary(message.get("content")),
+        "reasoning_len": len(message.get("reasoning") or "")
+        if isinstance(message.get("reasoning"), str)
+        else None,
+        "reasoning_content_len": len(message.get("reasoning_content") or "")
+        if isinstance(message.get("reasoning_content"), str)
+        else None,
+        "prompt_token_ids": _seq_summary(message.get("prompt_token_ids")),
+        "generation_token_ids": _seq_summary(message.get("generation_token_ids")),
+        "generation_log_probs": _seq_summary(message.get("generation_log_probs")),
+    }
+
+
+def _output_item_summary(item: Any) -> Dict[str, Any]:
+    if hasattr(item, "model_dump"):
+        item = item.model_dump()
+    if not isinstance(item, dict):
+        return {"type": type(item).__name__, "repr": _preview_text(item)}
+    summary = _message_summary(item)
+    summary["id"] = item.get("id")
+    if "summary" in item:
+        summary["summary"] = _content_summary(
+            [
+                {"type": s.get("type"), "text": s.get("text")}
+                for s in item.get("summary", [])
+                if isinstance(s, dict)
+            ]
+        )
+    return summary
+
+
+def _logprobs_summary(logprobs_content: Any) -> Dict[str, Any]:
+    if not isinstance(logprobs_content, list):
+        return {"present": logprobs_content is not None, "type": type(logprobs_content).__name__}
+    selected = logprobs_content[:5] + (logprobs_content[-5:] if len(logprobs_content) > 5 else [])
+    return {
+        "present": True,
+        "len": len(logprobs_content),
+        "sample": [
+            {
+                "token": entry.get("token") if isinstance(entry, dict) else None,
+                "logprob": entry.get("logprob") if isinstance(entry, dict) else None,
+            }
+            for entry in selected
+        ],
+    }
+
+
+def _debug_dump(component: str, event: str, payload: Dict[str, Any]) -> None:
+    path = _debug_jsonl_path(component)
+    if path is None:
+        return
+    row = {"event": event, "created_at": time(), **payload}
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, default=str) + "\n")
+
+
 class VLLMModelConfig(BaseResponsesAPIModelConfig):
     base_url: Union[str, List[str]]
     api_key: str
     model: str
     return_token_id_information: bool
+    max_input_tokens: Optional[int] = None
 
     uses_reasoning_parser: bool
     replace_developer_role_with_system: bool = False
@@ -119,6 +258,61 @@ class VLLMModel(SimpleResponsesAPIModel):
 
         self._converter = self.get_converter()
 
+    def _create_context_length_exceeded_chat_completion(
+        self, prompt_token_ids: Optional[List[int]] = None
+    ) -> NeMoGymChatCompletion:
+        message_kwargs = dict(
+            role="assistant",
+            content=None,
+            tool_calls=None,
+        )
+        if self.config.return_token_id_information and prompt_token_ids is not None:
+            message = NeMoGymChatCompletionMessageForTraining(
+                **message_kwargs,
+                prompt_token_ids=prompt_token_ids,
+                generation_token_ids=[],
+                generation_log_probs=[],
+            )
+        else:
+            message = NeMoGymChatCompletionMessage(**message_kwargs)
+
+        return NeMoGymChatCompletion(
+            id="chtcmpl-context-length-exceeded",
+            object="chat.completion",
+            created=int(time()),
+            model=self.config.model,
+            choices=[
+                NeMoGymChoice(
+                    index=0,
+                    finish_reason="context_length_exceeded",
+                    message=message,
+                )
+            ],
+            context_length_exceeded=True,
+        )
+
+    @staticmethod
+    def _get_tokenize_body_dict(body_dict: Dict[str, Any]) -> Dict[str, Any]:
+        tokenize_body_dict = {}
+        for key in ("model", "messages", "tools", "chat_template_kwargs", "mm_processor_kwargs"):
+            if key in body_dict:
+                tokenize_body_dict[key] = body_dict[key]
+        return tokenize_body_dict
+
+    async def _get_prompt_token_ids(
+        self, client: NeMoGymAsyncOpenAI, body_dict: Dict[str, Any]
+    ) -> List[int]:
+        tokenize_response = await self._get_tokenize_response(client, body_dict)
+        return tokenize_response["tokens"]
+
+    async def _get_tokenize_response(
+        self, client: NeMoGymAsyncOpenAI, body_dict: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        tokenize_response = await client.create_tokenize(
+            **self._get_tokenize_body_dict(body_dict)
+        )
+        return tokenize_response
+
     async def responses(
         self, request: Request, body: NeMoGymResponseCreateParamsNonStreaming = Body()
     ) -> NeMoGymResponse:
@@ -136,6 +330,18 @@ class VLLMModel(SimpleResponsesAPIModel):
 
         response_output = self._converter.postprocess_chat_response(choice)
         response_output_dicts = [item.model_dump() for item in response_output]
+        _debug_dump(
+            "gym_vllm_model",
+            "responses_postprocess_output",
+            {
+                "response_id": chat_completion_response.id,
+                "finish_reason": choice.finish_reason,
+                "output": [_output_item_summary(item) for item in response_output_dicts],
+                "usage": chat_completion_response.usage.model_dump()
+                if chat_completion_response.usage and hasattr(chat_completion_response.usage, "model_dump")
+                else chat_completion_response.usage,
+            },
+        )
 
         usage = None
         if chat_completion_response.usage:
@@ -147,6 +353,11 @@ class VLLMModel(SimpleResponsesAPIModel):
                 total_tokens=chat_completion_response.usage.prompt_tokens
                 + chat_completion_response.usage.completion_tokens,
             )
+
+        response_metadata = deepcopy(body.metadata) if body.metadata else None
+        if chat_completion_response.context_length_exceeded:
+            response_metadata = response_metadata or {}
+            response_metadata["context_length_exceeded"] = "true"
 
         incomplete_details = None
         if choice.finish_reason == "length":
@@ -176,7 +387,7 @@ class VLLMModel(SimpleResponsesAPIModel):
             text=body.text,
             top_logprobs=body.top_logprobs,
             truncation=body.truncation,
-            metadata=body.metadata,
+            metadata=response_metadata,
             instructions=body.instructions,
             user=body.user,
             incomplete_details=incomplete_details,
@@ -259,47 +470,24 @@ class VLLMModel(SimpleResponsesAPIModel):
                 logprobs=True,
                 # Typically passed via OpenAI client extra_body.
                 return_tokens_as_token_ids=True,
-                # TODO add this when NeMo RL upgrades to vLLM 0.10.2 support for prompt token ids
-                # For prompt and generation token IDs
-                # return_token_ids=True,
-                # For prompt token IDs
-                # prompt_logprobs=0,
+                # For prompt and generation token IDs.
+                return_token_ids=True,
             )
 
         if self.config.uses_reasoning_parser:
+            # Keep historical assistant turns as literal text, including any
+            # <think>...</think> tags. Splitting history back into reasoning
+            # fields changes chat-template whitespace and breaks prefix
+            # comparisons for generated turns.
             for message_dict in body_dict["messages"]:
                 if message_dict.get("role") != "assistant" or "content" not in message_dict:
                     continue
 
                 content = message_dict["content"]
-                if isinstance(content, str):
-                    reasoning_matches, remaining_content = self._converter._extract_reasoning_from_content(content)
-                    message_dict["content"] = remaining_content
-                    if reasoning_matches:
-                        message_dict["reasoning_content"] = reasoning_matches[0]
-
-                        # TODO when NeMo RL migrates to vLLM>=0.16.0, remove the reasoning_content support above.
-                        # Starting with vLLM 0.16.0, the `reasoning_content` field has been deprecated in favor of just `reasoning`
-                        message_dict["reasoning"] = reasoning_matches[0]
+                if isinstance(content, str) or not content:
+                    continue
                 elif isinstance(content, list):
-                    reasoning_content = None
-                    for content_item_dict in content:
-                        reasoning_matches, remaining_content = self._converter._extract_reasoning_from_content(
-                            content_item_dict["text"]
-                        )
-                        assert reasoning_content is None or not reasoning_matches, (
-                            f"Found multiple reasoning matches in a single assistant message content item list!\nMessage: {message_dict}"
-                        )
-
-                        # Even though we set the reasoning content already here, we still loop through all the content item dicts for the assert above.
-                        content_item_dict["text"] = remaining_content
-                        if reasoning_matches:
-                            message_dict["reasoning_content"] = reasoning_matches[0]
-                            # See the TODO wrt reasoning_content above
-                            message_dict["reasoning"] = reasoning_matches[0]
-                elif not content:
-                    # No content or content None is a no-op
-                    pass
+                    message_dict["content"] = "".join(part.get("text", "") for part in content)
                 else:
                     raise NotImplementedError
 
@@ -315,10 +503,68 @@ class VLLMModel(SimpleResponsesAPIModel):
         body_dict = self._preprocess_chat_completion_create_params(request, body_dict)
 
         client = self._resolve_client(request)
+        prompt_token_ids: Optional[List[int]] = None
+        vllm_max_model_len: Optional[int] = None
+
+        should_tokenize_prompt = self.config.max_input_tokens is not None
+        if should_tokenize_prompt:
+            tokenize_response = await self._get_tokenize_response(client, body_dict)
+            prompt_token_ids = tokenize_response["tokens"]
+            if tokenize_response.get("max_model_len") is not None:
+                vllm_max_model_len = int(tokenize_response["max_model_len"])
+
+        max_input_tokens = self.config.max_input_tokens
+        if vllm_max_model_len is not None:
+            max_input_tokens = (
+                vllm_max_model_len
+                if max_input_tokens is None
+                else min(max_input_tokens, vllm_max_model_len)
+            )
+
+        _debug_dump(
+            "gym_vllm_model",
+            "chat_request_pre_vllm",
+            {
+                "server_name": self.config.name,
+                "body_keys": sorted(body_dict.keys()),
+                "message_count": len(body_dict.get("messages", [])),
+                "messages": [_message_summary(message) for message in body_dict.get("messages", [])],
+                "chat_template_kwargs": body_dict.get("chat_template_kwargs"),
+                "return_token_id_information": self.config.return_token_id_information,
+                "prompt_token_ids": _seq_summary(prompt_token_ids),
+                "max_input_tokens": max_input_tokens,
+                "max_tokens": body_dict.get("max_tokens"),
+            },
+        )
+
+        if max_input_tokens is not None and prompt_token_ids is not None:
+            prompt_len = len(prompt_token_ids)
+            if prompt_len >= max_input_tokens:
+                return self._create_context_length_exceeded_chat_completion(
+                    prompt_token_ids
+                )
+
+            remaining_budget = max_input_tokens - prompt_len
+            requested_max_tokens = body_dict.get("max_tokens")
+            body_dict["max_tokens"] = (
+                remaining_budget
+                if requested_max_tokens is None
+                else min(requested_max_tokens, remaining_budget)
+            )
+            if requested_max_tokens != body_dict["max_tokens"]:
+                LOGGER.info(
+                    "Clamped vLLM max_tokens from %s to %s for prompt_len=%s max_input_tokens=%s",
+                    requested_max_tokens,
+                    body_dict["max_tokens"],
+                    prompt_len,
+                    max_input_tokens,
+                )
 
         if not self.config.sequential_reasoning_allowed:
             last_message = body_dict["messages"][-1]
-            if last_message["role"] == "assistant" and not (last_message["content"] or last_message.get("tool_calls")):
+            if last_message["role"] == "assistant" and not (
+                self._has_visible_assistant_content(last_message) or last_message.get("tool_calls")
+            ):
                 res = self._create_empty_chat_completion()
                 res.choices[0].finish_reason = "content_filter"
                 return res
@@ -350,6 +596,23 @@ class VLLMModel(SimpleResponsesAPIModel):
                 raise e
 
         choice_dict = chat_completion_dict["choices"][0]
+        _debug_dump(
+            "gym_vllm_model",
+            "raw_chat_completion",
+            {
+                "server_name": self.config.name,
+                "chat_completion_keys": sorted(chat_completion_dict.keys()),
+                "choice_keys": sorted(choice_dict.keys()),
+                "finish_reason": choice_dict.get("finish_reason"),
+                "message": _message_summary(choice_dict.get("message", {})),
+                "logprobs": _logprobs_summary(
+                    (choice_dict.get("logprobs") or {}).get("content")
+                    if isinstance(choice_dict.get("logprobs"), dict)
+                    else None
+                ),
+                "usage": chat_completion_dict.get("usage"),
+            },
+        )
         if self.config.uses_reasoning_parser:
             # See the TODO wrt reasoning_content above
             reasoning_content = choice_dict["message"].get("reasoning_content") or choice_dict["message"].get(
@@ -374,47 +637,50 @@ class VLLMModel(SimpleResponsesAPIModel):
             log_probs = (choice_dict.get("logprobs") or {}).get("content") or []
             generation_log_probs = [log_prob["logprob"] for log_prob in log_probs]
 
-            """
-            START TODO remove this when NeMo RL upgrades to vLLM 0.10.2 support for prompt token ids
-            """
-            # Looks like `"token_id:151667"`
-            generation_token_ids = [log_prob["token"].removeprefix("token_id:") for log_prob in log_probs]
+            generation_token_ids = choice_dict.get("token_ids")
+            if generation_token_ids is None:
+                # Fallback for older vLLM responses that only expose token IDs
+                # as synthetic logprob token strings like `"token_id:151667"`.
+                generation_token_ids = [log_prob["token"].removeprefix("token_id:") for log_prob in log_probs]
 
-            # The tokenize endpoint doesn't accept any sampling parameters
-            # The only relevant params are model, messages, and tools.
-            #
-            # IMPORTANT: pass through chat-template knobs (e.g. enable_thinking)
-            # when tokenizing, otherwise `prompt_token_ids` (and therefore logged
-            # `prompt_str`) can be built with different chat template settings than
-            # the actual generation request.
-            tokenize_body_dict = dict()
-            for key in ("model", "messages", "tools", "chat_template_kwargs"):
-                if key in body_dict:
-                    tokenize_body_dict[key] = body_dict[key]
+            prompt_token_ids_for_message = chat_completion_dict.get("prompt_token_ids")
+            if prompt_token_ids_for_message is None:
+                # The tokenize endpoint doesn't accept sampling parameters.
+                # Preserve chat-template knobs so fallback prompt IDs match
+                # the generation request as closely as possible.
+                tokenize_body_dict = dict()
+                for key in ("model", "messages", "tools", "chat_template_kwargs"):
+                    if key in body_dict:
+                        tokenize_body_dict[key] = body_dict[key]
 
-            # The base url has /v1 at the end but vLLM's tokenize endpoint does not have v1, hence the ..
-            tokenize_response = await client.create_tokenize(**tokenize_body_dict)
-            """
-            END
-            """
+                # The base URL has /v1 at the end but vLLM's tokenize endpoint
+                # does not have v1, hence the client shim routes to ../tokenize.
+                tokenize_response = await client.create_tokenize(**tokenize_body_dict)
+                prompt_token_ids_for_message = tokenize_response["tokens"]
 
             message_dict = choice_dict["message"]
             message_dict.update(
                 dict(
-                    # TODO add this when NeMo RL upgrades to vLLM 0.10.2 support for prompt token ids
-                    # prompt_token_ids=chat_completion_dict["prompt_token_ids"],
-                    prompt_token_ids=tokenize_response["tokens"],
-                    # generation_token_ids=choice_dict["token_ids"],
+                    prompt_token_ids=prompt_token_ids_for_message,
                     generation_token_ids=generation_token_ids,
                     generation_log_probs=generation_log_probs,
                 )
             )
 
             # Clean the duplicated information
-            choice_dict.pop("logprobs")
-            # TODO add this when NeMo RL upgrades to vLLM 0.10.2 support for prompt token ids
-            # chat_completion_dict.pop("prompt_token_ids")
-            # choice_dict.pop("token_ids")
+            choice_dict.pop("logprobs", None)
+            chat_completion_dict.pop("prompt_token_ids", None)
+            choice_dict.pop("token_ids", None)
+
+        _debug_dump(
+            "gym_vllm_model",
+            "chat_completion_after_token_metadata",
+            {
+                "server_name": self.config.name,
+                "finish_reason": choice_dict.get("finish_reason"),
+                "message": _message_summary(choice_dict.get("message", {})),
+            },
+        )
 
         return NeMoGymChatCompletion.model_validate(chat_completion_dict)
 
@@ -447,6 +713,15 @@ class VLLMModel(SimpleResponsesAPIModel):
         client = self._session_id_to_client[session_id]
 
         return client
+
+    def _has_visible_assistant_content(self, message: Dict[str, Any]) -> bool:
+        content = message.get("content")
+        if not content:
+            return False
+        if isinstance(content, str):
+            _, remaining_content = self._converter._extract_reasoning_from_content(content)
+            return bool(remaining_content)
+        return True
 
 
 class VLLMConverterResponsesToChatCompletionsState(BaseModel):
@@ -498,7 +773,7 @@ class VLLMConverter(BaseModel):
 
     @staticmethod
     def _wrap_reasoning_in_think_tags(texts: List[str]) -> str:
-        return "".join(f"<think>{t}</think>" for t in texts if t)
+        return "".join(f"<think>\n{t.lstrip()}</think>" for t in texts if t)
 
     @classmethod
     def _parse_think_tags(cls, content: str) -> Tuple[List[str], str]:
@@ -716,7 +991,18 @@ class VLLMConverter(BaseModel):
     # =======================================================
 
     def postprocess_chat_response(self, choice: NeMoGymChoice) -> List[NeMoGymResponseOutputItem]:
-        return self.postprocess_assistant_message_dict(choice.message.model_dump())
+        raw_message = choice.message.model_dump()
+        response_output = self.postprocess_assistant_message_dict(raw_message)
+        _debug_dump(
+            "gym_vllm_model",
+            "converter_postprocess_chat_response",
+            {
+                "choice_finish_reason": choice.finish_reason,
+                "raw_message": _message_summary(raw_message),
+                "output": [_output_item_summary(item) for item in response_output],
+            },
+        )
+        return response_output
 
     def postprocess_assistant_message_dict(self, message_dict: Dict[str, Any]) -> List[NeMoGymResponseOutputItem]:
         response_output = []

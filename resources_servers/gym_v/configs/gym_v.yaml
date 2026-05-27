@@ -1,0 +1,41 @@
+gym_v_resources_server:
+  resources_servers:
+    gym_v:
+      entrypoint: app.py
+      domain: games
+      verified: false
+      description: "Env-id-parametric wrapper around any gym_v.Env."
+      # Deprecated compatibility path. Stateless clients pass the full
+      # GymVTaskRow to /seed_session, so the server no longer needs a task
+      # JSONL at startup. Tests still cover task_idx fallback with explicit
+      # per-test JSONLs.
+      task_jsonl_fpaths: []
+      image_format: "PNG"
+      image_jpeg_quality: 90
+      enforce_horizon_cap: true
+      return_transitions: false
+      disable_text_feedback: true
+gym_v_agent:
+  responses_api_agents:
+    text_action_agent:
+      entrypoint: app.py
+      resources_server:
+        type: resources_servers
+        name: gym_v_resources_server
+      model_server:
+        type: responses_api_models
+        name: policy_model
+      max_steps: 64
+      done_if_no_boxed_answer: false     # client-side recovery on missing \boxed{}
+      return_transitions: false          # Doc 1 R3 — flat trajectory shape
+      # NOTE: `max_total_sequence_length` was originally set to
+      # `${policy.max_total_sequence_length}`, but NeMo-Gym loads this YAML
+      # in its own OmegaConf context where `policy.*` does not resolve. The
+      # field is a defensive pre-emption for vLLM context-exceed errors;
+      # vLLM still rejects oversize requests on its own, so omitting the
+      # field is safe. Re-add as a literal int (e.g., 49152) if you want
+      # the agent-side guardrail back.
+      datasets:
+        - name: example
+          type: example
+          jsonl_fpath: data/all_example_tasks_path_b.jsonl

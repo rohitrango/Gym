@@ -468,7 +468,7 @@ PARAMETERIZE_DATA = [
             messages=[
                 NeMoGymChatCompletionAssistantMessageParam(
                     role="assistant",
-                    content="<think>I have identified the city as San Francisco based on user input.</think>",
+                    content="<think>\nI have identified the city as San Francisco based on user input.</think>",
                     tool_calls=[],
                 )
             ],
@@ -531,7 +531,7 @@ PARAMETERIZE_DATA = [
             messages=[
                 NeMoGymChatCompletionAssistantMessageParam(
                     role="assistant",
-                    content="<think>I'll first think about the user's question.</think><think>Then I will answer.</think>",
+                    content="<think>\nI'll first think about the user's question.</think><think>\nThen I will answer.</think>",
                     tool_calls=[],
                 )
             ],
@@ -682,6 +682,225 @@ class TestApp:
 
     async def test_sanity(self, monkeypatch: MonkeyPatch) -> None:
         self._setup_server(monkeypatch)
+
+    def test_responses_marks_context_length_exceeded_on_preflight(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        config = VLLMModelConfig(
+            host="0.0.0.0",
+            port=8081,
+            base_url="http://api.openai.com/v1",
+            api_key="dummy_key",  # pragma: allowlist secret
+            model="dummy_model",
+            entrypoint="",
+            name="",
+            return_token_id_information=True,
+            uses_reasoning_parser=False,
+            max_input_tokens=4,
+        )
+        get_global_config_dict_mock = MagicMock()
+        get_global_config_dict_mock.return_value = dict()
+        monkeypatch.setattr(
+            nemo_gym.server_utils,
+            "get_global_config_dict",
+            get_global_config_dict_mock,
+        )
+        server = VLLMModel(config=config, server_client=MagicMock(spec=ServerClient))
+        app = server.setup_webserver()
+        client = TestClient(app)
+
+        mock_client = AsyncMock(spec=NeMoGymAsyncOpenAI)
+        mock_client.create_tokenize.return_value = {"tokens": [11, 12, 13, 14]}
+        monkeypatch.setattr(
+            VLLMModel,
+            "_resolve_client",
+            lambda self, request: mock_client,
+        )
+
+        response = client.post(
+            "/v1/responses",
+            json={"input": [{"role": "user", "content": "hello"}]},
+        )
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["metadata"] == {"context_length_exceeded": "true"}
+        assert data["output"][0]["prompt_token_ids"] == [11, 12, 13, 14]
+        assert data["output"][0]["generation_token_ids"] == []
+        assert data["output"][0]["generation_log_probs"] == []
+        assert mock_client.create_chat_completion.await_count == 0
+
+        chat_response = client.post(
+            "/v1/chat/completions",
+            json={
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
+        assert chat_response.status_code == 200
+        chat_data = chat_response.json()
+        assert chat_data["id"] == "chtcmpl-context-length-exceeded"
+        assert chat_data["choices"][0]["finish_reason"] == "context_length_exceeded"
+        assert chat_data["context_length_exceeded"] is True
+        assert mock_client.create_chat_completion.await_count == 0
+
+    def test_chat_completions_clamps_max_tokens_to_remaining_context(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        config = VLLMModelConfig(
+            host="0.0.0.0",
+            port=8081,
+            base_url="http://api.openai.com/v1",
+            api_key="dummy_key",  # pragma: allowlist secret
+            model="dummy_model",
+            entrypoint="",
+            name="",
+            return_token_id_information=False,
+            uses_reasoning_parser=False,
+            max_input_tokens=10,
+            extra_body={
+                "bad_words": ["<image>"],
+                "mm_processor_kwargs": {"precomputed_imgs_sizes": [[128, 256]]},
+            },
+        )
+        get_global_config_dict_mock = MagicMock()
+        get_global_config_dict_mock.return_value = dict()
+        monkeypatch.setattr(
+            nemo_gym.server_utils,
+            "get_global_config_dict",
+            get_global_config_dict_mock,
+        )
+        server = VLLMModel(config=config, server_client=MagicMock(spec=ServerClient))
+        app = server.setup_webserver()
+        client = TestClient(app)
+
+        mock_client = AsyncMock(spec=NeMoGymAsyncOpenAI)
+        mock_client.create_tokenize.return_value = {
+            "tokens": [11, 12, 13],
+            "max_model_len": 5,
+        }
+        mock_client.create_chat_completion.return_value = {
+            "id": "chtcmpl-clamped",
+            "object": "chat.completion",
+            "created": FIXED_TIME,
+            "model": "dummy_model",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "ok"},
+                }
+            ],
+        }
+        monkeypatch.setattr(
+            VLLMModel,
+            "_resolve_client",
+            lambda self, request: mock_client,
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "messages": [{"role": "user", "content": "hello"}],
+                "max_tokens": 7,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["id"] == "chtcmpl-clamped"
+        assert mock_client.create_tokenize.await_args.kwargs["mm_processor_kwargs"] == {
+            "precomputed_imgs_sizes": [[128, 256]]
+        }
+        assert "bad_words" not in mock_client.create_tokenize.await_args.kwargs
+        assert mock_client.create_chat_completion.await_args.kwargs["max_tokens"] == 2
+
+    def test_responses_return_token_id_information_uses_native_vllm_token_ids(
+        self,
+        monkeypatch: MonkeyPatch,
+    ):
+        config = VLLMModelConfig(
+            host="0.0.0.0",
+            port=8081,
+            base_url="http://api.openai.com/v1",
+            api_key="dummy_key",  # pragma: allowlist secret
+            model="dummy_model",
+            entrypoint="",
+            name="",
+            return_token_id_information=True,
+            uses_reasoning_parser=False,
+        )
+        server = VLLMModel(config=config, server_client=MagicMock(spec=ServerClient))
+        app = server.setup_webserver()
+
+        captured_kwargs = {}
+
+        async def mock_create_chat_completion(**kwargs):
+            captured_kwargs.update(kwargs)
+            return {
+                "id": "chtcmpl",
+                "object": "chat.completion",
+                "created": FIXED_TIME,
+                "model": "dummy_model",
+                "prompt_token_ids": [1, 2, 3],
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "response",
+                            "tool_calls": [],
+                        },
+                        "token_ids": [41, 42],
+                        "logprobs": {
+                            "content": [
+                                {
+                                    "token": "token_id:999",
+                                    "logprob": -0.1,
+                                    "bytes": [],
+                                },
+                                {
+                                    "token": "token_id:998",
+                                    "logprob": -0.2,
+                                    "bytes": [],
+                                },
+                            ]
+                        },
+                    }
+                ],
+            }
+
+        mock_client = MagicMock(spec=NeMoGymAsyncOpenAI)
+        mock_client.create_chat_completion = AsyncMock(
+            side_effect=mock_create_chat_completion
+        )
+        mock_client.create_tokenize = AsyncMock()
+        server._clients = [mock_client]
+
+        client = TestClient(app)
+        request_body = NeMoGymResponseCreateParamsNonStreaming(
+            input=[
+                NeMoGymEasyInputMessage(
+                    type="message",
+                    role="user",
+                    content="hello",
+                )
+            ],
+        )
+
+        response = client.post(
+            "/v1/responses",
+            json=request_body.model_dump(exclude_unset=True, mode="json"),
+        )
+
+        assert response.status_code == 200
+        assert captured_kwargs["logprobs"] is True
+        assert captured_kwargs["return_tokens_as_token_ids"] is True
+        assert captured_kwargs["return_token_ids"] is True
+        mock_client.create_tokenize.assert_not_awaited()
+
+        output_item = response.json()["output"][0]
+        assert output_item["prompt_token_ids"] == [1, 2, 3]
+        assert output_item["generation_token_ids"] == [41, 42]
+        assert output_item["generation_log_probs"] == [-0.1, -0.2]
 
     def test_responses_multistep(self, monkeypatch: MonkeyPatch):
         server = self._setup_server(monkeypatch)
@@ -1012,7 +1231,7 @@ class TestApp:
         expected_sent_messages = [
             {"content": [{"text": "Hello", "type": "text"}], "role": "user"},
             {
-                "content": "<think>Considering ways to greet the user...</think>Hi, how can I help?",
+                "content": "<think>\nConsidering ways to greet the user...</think>Hi, how can I help?",
                 "role": "assistant",
                 "tool_calls": [],
             },
@@ -1271,7 +1490,7 @@ class TestApp:
                 "role": "user",
             },
             {
-                "content": "<think>Checking order details...</think>Sure, one sec.Gathering order status and delivery info..",
+                "content": "<think>\nChecking order details...</think>Sure, one sec.Gathering order status and delivery info..",
                 "role": "assistant",
                 "tool_calls": [
                     {
@@ -1724,7 +1943,7 @@ class TestApp:
                     summary=[
                         NeMoGymSummary(
                             type="summary_text",
-                            text="Gathering order status and delivery info...",
+                            text="\nGathering order status and delivery info...",
                         )
                     ],
                 ),
@@ -1790,10 +2009,8 @@ class TestApp:
             {"content": [{"text": "Check my order status", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": "Sure, one sec.",
+                "content": "<think>\nFirst reasoning item</think>Sure, one sec.",
                 "tool_calls": [],
-                "reasoning_content": "First reasoning item",
-                "reasoning": "First reasoning item",
             },
             {"content": [{"text": "cool", "type": "text"}], "role": "user"},
             {
@@ -1871,7 +2088,7 @@ class TestApp:
                     summary=[
                         NeMoGymSummary(
                             type="summary_text",
-                            text="None content test",
+                            text="\nNone content test",
                         )
                     ],
                 ),
@@ -1884,10 +2101,8 @@ class TestApp:
             {"content": [{"text": "Check my order status", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": "Sure, one sec.",
+                "content": "<think>\nFirst reasoning item</think>Sure, one sec.",
                 "tool_calls": [],
-                "reasoning_content": "First reasoning item",
-                "reasoning": "First reasoning item",
             },
             {"content": [{"text": "cool", "type": "text"}], "role": "user"},
             {
@@ -1898,7 +2113,7 @@ class TestApp:
             {"content": [{"text": "ok", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": " hello hello",
+                "content": "<think>\nGathering order status and delivery info...</think> hello hello",
                 "tool_calls": [
                     {
                         "id": "call_123",
@@ -1911,8 +2126,6 @@ class TestApp:
                         "type": "function",
                     },
                 ],
-                "reasoning_content": "Gathering order status and delivery info...",
-                "reasoning": "Gathering order status and delivery info...",
             },
             {"content": [{"text": "user", "type": "text"}], "role": "user"},
         ]
@@ -1999,10 +2212,8 @@ class TestApp:
             {"content": [{"text": "Check my order status", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": "Sure, one sec.",
+                "content": "<think>\nFirst reasoning item</think>Sure, one sec.",
                 "tool_calls": [],
-                "reasoning_content": "First reasoning item",
-                "reasoning": "First reasoning item",
             },
             {"content": [{"text": "cool", "type": "text"}], "role": "user"},
             {
@@ -2013,7 +2224,7 @@ class TestApp:
             {"content": [{"text": "ok", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": " hello hello",
+                "content": "<think>\nGathering order status and delivery info...</think> hello hello",
                 "tool_calls": [
                     {
                         "id": "call_123",
@@ -2026,16 +2237,12 @@ class TestApp:
                         "type": "function",
                     },
                 ],
-                "reasoning_content": "Gathering order status and delivery info...",
-                "reasoning": "Gathering order status and delivery info...",
             },
             {"content": [{"text": "user", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": "",
+                "content": "<think>\nNone content test</think>",
                 "tool_calls": [],
-                "reasoning_content": "None content test",
-                "reasoning": "None content test",
             },
             {"content": [{"text": "user", "type": "text"}], "role": "user"},
         ]
@@ -2181,7 +2388,7 @@ class TestApp:
                     summary=[
                         NeMoGymSummary(
                             type="summary_text",
-                            text="Gathering order status and delivery info...",
+                            text="\nGathering order status and delivery info...",
                         )
                     ],
                 ),
@@ -2247,10 +2454,8 @@ class TestApp:
             {"content": [{"text": "Check my order status", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": "Sure, one sec.",
+                "content": "<think>\nFirst reasoning item</think>Sure, one sec.",
                 "tool_calls": [],
-                "reasoning_content": "First reasoning item",
-                "reasoning": "First reasoning item",
             },
             {"content": [{"text": "cool", "type": "text"}], "role": "user"},
             {
@@ -2328,7 +2533,7 @@ class TestApp:
                     summary=[
                         NeMoGymSummary(
                             type="summary_text",
-                            text="None content test",
+                            text="\nNone content test",
                         )
                     ],
                 ),
@@ -2341,10 +2546,8 @@ class TestApp:
             {"content": [{"text": "Check my order status", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": "Sure, one sec.",
+                "content": "<think>\nFirst reasoning item</think>Sure, one sec.",
                 "tool_calls": [],
-                "reasoning_content": "First reasoning item",
-                "reasoning": "First reasoning item",
             },
             {"content": [{"text": "cool", "type": "text"}], "role": "user"},
             {
@@ -2355,7 +2558,7 @@ class TestApp:
             {"content": [{"text": "ok", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": " hello hello",
+                "content": "<think>\nGathering order status and delivery info...</think> hello hello",
                 "tool_calls": [
                     {
                         "id": "call_123",
@@ -2368,8 +2571,6 @@ class TestApp:
                         "type": "function",
                     },
                 ],
-                "reasoning_content": "Gathering order status and delivery info...",
-                "reasoning": "Gathering order status and delivery info...",
             },
             {"content": [{"text": "user", "type": "text"}], "role": "user"},
         ]
@@ -2456,10 +2657,8 @@ class TestApp:
             {"content": [{"text": "Check my order status", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": "Sure, one sec.",
+                "content": "<think>\nFirst reasoning item</think>Sure, one sec.",
                 "tool_calls": [],
-                "reasoning_content": "First reasoning item",
-                "reasoning": "First reasoning item",
             },
             {"content": [{"text": "cool", "type": "text"}], "role": "user"},
             {
@@ -2470,7 +2669,7 @@ class TestApp:
             {"content": [{"text": "ok", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": " hello hello",
+                "content": "<think>\nGathering order status and delivery info...</think> hello hello",
                 "tool_calls": [
                     {
                         "id": "call_123",
@@ -2483,16 +2682,12 @@ class TestApp:
                         "type": "function",
                     },
                 ],
-                "reasoning_content": "Gathering order status and delivery info...",
-                "reasoning": "Gathering order status and delivery info...",
             },
             {"content": [{"text": "user", "type": "text"}], "role": "user"},
             {
                 "role": "assistant",
-                "content": "",
+                "content": "<think>\nNone content test</think>",
                 "tool_calls": [],
-                "reasoning_content": "None content test",
-                "reasoning": "None content test",
             },
             {"content": [{"text": "user", "type": "text"}], "role": "user"},
         ]
@@ -2726,6 +2921,18 @@ class TestVLLMConverter:
         assert reasoning_none == []
         assert main_content_none == "Just plain content here."
 
+    def test_wrap_reasoning_preserves_trailing_whitespace(self):
+        assert (
+            self.converter._wrap_reasoning_in_think_tags(["reasoning\n"])
+            == "<think>\nreasoning\n</think>"
+        )
+
+    def test_wrap_reasoning_strips_leading_newline_from_summary(self):
+        assert (
+            self.converter._wrap_reasoning_in_think_tags(["\nreasoning text\n"])
+            == "<think>\nreasoning text\n</think>"
+        )
+
     def test_postprocess_chat_response_multiple_reasoning_items(self, monkeypatch: MonkeyPatch):
         monkeypatch.setattr("responses_api_models.vllm_model.app.uuid4", lambda: FakeUUID())
         monkeypatch.setattr("responses_api_models.vllm_model.app.time", lambda: FIXED_TIME)
@@ -2869,7 +3076,7 @@ class TestVLLMConverter:
             ),
             NeMoGymChatCompletionAssistantMessageParam(
                 role="assistant",
-                content="<think>I'm thinking</think>I'm chatting!",
+                content="<think>\nI'm thinking</think>I'm chatting!",
                 tool_calls=[
                     NeMoGymChatCompletionMessageToolCallParam(
                         id="tool call 1",
@@ -2972,7 +3179,7 @@ class TestVLLMConverter:
             ),
             NeMoGymChatCompletionAssistantMessageForTrainingParam(
                 role="assistant",
-                content="<think>I'm thinking</think>I'm chatting!",
+                content="<think>\nI'm thinking</think>I'm chatting!",
                 tool_calls=[
                     NeMoGymChatCompletionMessageToolCallParam(
                         id="tool call 1",
@@ -3110,7 +3317,7 @@ class TestVLLMConverter:
             ),
             NeMoGymChatCompletionAssistantMessageParam(
                 role="assistant",
-                content="<think> \n \n I'm thinking \n \n </think> \n \n I'm chatting! \n \n ",
+                content="<think>\nI'm thinking \n \n </think> \n \n I'm chatting! \n \n ",
                 tool_calls=[
                     NeMoGymChatCompletionMessageToolCallParam(
                         id="tool call 1",

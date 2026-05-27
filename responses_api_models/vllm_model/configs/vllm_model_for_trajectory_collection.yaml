@@ -1,0 +1,37 @@
+policy_model:
+  responses_api_models:
+    vllm_model:
+      entrypoint: app.py
+      base_url: ${policy_base_url}
+      api_key: ${policy_api_key}
+      model: ${policy_model_name}
+      max_input_tokens: ${policy_max_input_tokens}
+      return_token_id_information: true
+      chat_template_kwargs: ${policy_chat_template_kwargs}
+      # reasoning_parser remains deepseek_r1 in the engine config, and the
+      # active Game-RLVR tokenizer config enables native <think> generation.
+      # PATH_B_SYSTEM_PROMPT keeps the reasoning block brief and requires the
+      # boxed action immediately after </think>.
+      uses_reasoning_parser: true
+      # Trajectory-collection variant: kept separate from
+      # `vllm_model_for_training.yaml` so we can experiment with
+      # trajectory-collection-specific settings (chat-template kwargs,
+      # sampling, etc.) without disturbing actual training runs.
+      #
+      # History of `enable_thinking` here:
+      # - Initially set to `false` (job 11731129 / 11731385) to eliminate
+      #   `<think>` truncation that confounded V0's format measurement.
+      # - With `enable_thinking=false`, the chat template prefills the
+      #   assistant turn with `<think></think>` (close tag), which the model
+      #   reads as "no thinking required" and emits ~8 tokens straight to
+      #   `\boxed{...}`. That's enough to verify format compliance, but too
+      #   sparse for the model to actually engage with the env's content
+      #   (FrozenLake's image, GoL's grid). All 32 GoL rollouts emitted
+      #   FrozenLake-style `[direction]` actions because the model
+      #   pattern-matched on the reminder template instead of looking at
+      #   the env's per-turn user message.
+      # - Re-enabled for Game-RLVR so the model can do bounded reasoning
+      #   inside `<think>` and actually integrate the env's content. Brevity is
+      #   enforced via PATH_B_SYSTEM_PROMPT, which asks for 1-2 sentences and
+      #   then the final boxed action after </think>. max_output_tokens stays
+      #   as the safety net.

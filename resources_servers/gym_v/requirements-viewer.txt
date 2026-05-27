@@ -1,0 +1,8 @@
+# Interactive model-in-the-loop viewer extras for resources_servers/gym_v/play_with_model.py.
+#
+# Kept separate from the main requirements.txt per the design doc so that
+# trajectory-collection-only deploys can omit them. The container overlay
+# (docker/Dockerfile.gym_v_extras) installs them anyway because adding pip
+# packages into a running .sqsh on the cluster is impractical.
+gradio>=4,<6
+httpx>=0.27
