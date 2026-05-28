@@ -851,16 +851,18 @@ class VLLMConverter(BaseModel):
 
         tools = responses_create_params.pop("tools", None)
         if tools is not None:
-            responses_create_params["tools"] = []
+            chat_completion_tools = []
             for tool_dict in tools:
                 tool_dict = tool_dict.copy()
                 tool_dict.pop("type", None)
 
                 # As of vLLM 0.17.1, vLLM Chat Completions does not accept this `strict` parameter on tool definitions that OpenAI accepts.
                 tool_dict.pop("strict", None)
-                responses_create_params["tools"].append(
+                chat_completion_tools.append(
                     NeMoGymChatCompletionToolParam(type="function", function=NeMoGymFunctionDefinition(**tool_dict))
                 )
+            if chat_completion_tools:
+                responses_create_params["tools"] = chat_completion_tools
 
         chat_completion_create_params = NeMoGymChatCompletionCreateParamsNonStreaming(
             messages=state.messages,

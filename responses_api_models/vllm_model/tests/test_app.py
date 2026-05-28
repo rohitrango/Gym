@@ -3034,6 +3034,18 @@ class TestVLLMConverter:
 
         assert "bad_words" not in actual_chat_completion_create_params.model_dump(exclude_unset=True)
 
+    def test_responses_empty_tools_omitted_from_chat_completions(self):
+        responses_create_params = NeMoGymResponseCreateParamsNonStreaming(
+            input="hello",
+            tools=[],
+        )
+
+        actual_chat_completion_create_params = self.converter.responses_to_chat_completion_create_params(
+            responses_create_params
+        )
+
+        assert "tools" not in actual_chat_completion_create_params.model_dump(exclude_unset=True)
+
     def test_round_trip_chat_completions(self) -> None:
         message = NeMoGymChatCompletionMessage(
             content="<think>I'm thinking</think>I'm chatting!",
