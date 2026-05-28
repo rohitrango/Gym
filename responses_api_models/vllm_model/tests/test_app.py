@@ -3022,7 +3022,7 @@ class TestVLLMConverter:
 
         assert actual_chat_completion_create_params.messages == expected_chat_completion_create_params.messages
 
-    def test_responses_bad_words_forward_to_chat_completions(self):
+    def test_responses_bad_words_strip_from_chat_completions(self):
         responses_create_params = NeMoGymResponseCreateParamsNonStreaming(
             input="hello",
             bad_words=["<image>", "<img>"],
@@ -3032,7 +3032,7 @@ class TestVLLMConverter:
             responses_create_params
         )
 
-        assert actual_chat_completion_create_params.bad_words == ["<image>", "<img>"]
+        assert "bad_words" not in actual_chat_completion_create_params.model_dump(exclude_unset=True)
 
     def test_round_trip_chat_completions(self) -> None:
         message = NeMoGymChatCompletionMessage(

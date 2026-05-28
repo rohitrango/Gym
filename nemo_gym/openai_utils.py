@@ -430,8 +430,6 @@ class NeMoGymChatCompletionCreateParamsNonStreaming(BaseModel):
     logprobs: Optional[bool] = None
     max_completion_tokens: Optional[int] = None
     max_tokens: Optional[int] = None
-    # vLLM extension used by NeMo RL to suppress modal sentinel tokens.
-    bad_words: Optional[List[str]] = None
     metadata: Optional[Metadata] = None
     modalities: Optional[List[Literal["text", "audio"]]] = None
     n: Optional[int] = None
