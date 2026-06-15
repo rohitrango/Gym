@@ -333,6 +333,11 @@ _ENV_KWARGS_PRESETS: dict[str, str] = {
     "Logic/MiniSudoku-v0": '{"dataset_kwargs": {"size": 500}, "cell_px": 80, "padding": 24}',
     "Puzzles/TowerOfHanoi-v0": '{"dataset_kwargs": {"size": 500, "min_disks": 3, "max_disks": 4, "min_pegs": 3, "max_pegs": 4}}',
     "Arc/ArcAgi-v0": '{"dataset_kwargs": {"size": 500}, "cell_px": 16, "padding": 16}',
+    "Graphs/GridComponent-v0": '{"max_n_m": 16, "cell_px": 56, "padding": 24}',
+    "Graphs/TreeEvenPartitioning-v0": '{"max_n": 3, "max_k": 3, "node_radius": 20, "image_size": 800, "padding": 80}',
+    "Graphs/MaximumIndependentSetTree-v0": '{"max_n": 6, "node_radius": 22, "image_size": 700, "padding": 60}',
+    "Geometry/Tangram-QA-v0": '{"grid_size": 5, "num_seeds": 4, "num_pieces_to_remove": 1, "question_type": 0}',
+    "Geometry/SmallestCircle-v0": '{"n_points": 6}',
 }
 
 

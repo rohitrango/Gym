@@ -67,3 +67,13 @@ requires_reasoning_gym = pytest.mark.skipif(
     not _has_module("reasoning_gym"),
     reason="reasoning_gym not installed; rebuild the resources-server container.",
 )
+
+requires_networkx = pytest.mark.skipif(
+    not _has_module("networkx"),
+    reason="networkx not installed; required by Gym-V's graph envs (e.g. TreeEvenPartitioning).",
+)
+
+requires_matplotlib = pytest.mark.skipif(
+    not _has_module("matplotlib"),
+    reason="matplotlib not installed; required by Gym-V's plotting-based geometry envs (e.g. SmallestCircle).",
+)

@@ -20,7 +20,12 @@ integration gate the new container image must satisfy.
 """
 from __future__ import annotations
 
-from conftest import requires_gym_v, requires_reasoning_gym
+from conftest import (
+    requires_gym_v,
+    requires_matplotlib,
+    requires_networkx,
+    requires_reasoning_gym,
+)
 
 
 @requires_gym_v
@@ -86,3 +91,197 @@ def test_real_frozenlake_step_round_trip_with_env_info() -> None:
 
     assert message.env_info is not None
     assert "invalid_action" in message.env_info, "FrozenLake step info must expose invalid_action."
+
+
+@requires_gym_v
+def test_real_gridcomponent_reset_and_step_with_oracle_answer() -> None:
+    import gym_v
+
+    from resources_servers.gym_v._observation import observation_to_user_message
+
+    env = gym_v.make(
+        "Graphs/GridComponent-v0",
+        max_n_m=4,
+        cell_px=56,
+        padding=24,
+    )
+    obs_dict, info_dict = env.reset(seed=1729)
+    assert set(obs_dict.keys()) == {"agent_0"}
+
+    message = observation_to_user_message(
+        obs_dict["agent_0"],
+        env_id="Graphs/GridComponent-v0",
+        prefix_text=env.description if isinstance(env.description, str) else "",
+    )
+    types = [part.get("type") for part in message.content]
+    assert "input_image" in types, "GridComponent must produce a rendered grid image."
+
+    oracle = info_dict["agent_0"]["oracle_answer"]
+    _obs, reward_dict, _term, _trunc, _info = env.step({"agent_0": oracle})
+    assert reward_dict["agent_0"] == 1.0, "Stepping with the oracle answer must score 1.0."
+
+    env2 = gym_v.make("Graphs/GridComponent-v0", max_n_m=4, cell_px=56, padding=24)
+    env2.reset(seed=1729)
+    _obs, reward_dict, _term, _trunc, _info = env2.step({"agent_0": "not-an-integer"})
+    assert reward_dict["agent_0"] == 0.0, "Non-integer answer must score 0.0."
+
+
+@requires_gym_v
+@requires_networkx
+def test_real_treeevenpartitioning_reset_and_step_with_oracle_answer() -> None:
+    import gym_v
+
+    from resources_servers.gym_v._observation import observation_to_user_message
+
+    env = gym_v.make(
+        "Graphs/TreeEvenPartitioning-v0",
+        max_n=3,
+        max_k=3,
+        node_radius=20,
+        image_size=800,
+        padding=80,
+    )
+    obs_dict, info_dict = env.reset(seed=1729)
+    assert set(obs_dict.keys()) == {"agent_0"}
+
+    message = observation_to_user_message(
+        obs_dict["agent_0"],
+        env_id="Graphs/TreeEvenPartitioning-v0",
+        prefix_text=env.description if isinstance(env.description, str) else "",
+    )
+    types = [part.get("type") for part in message.content]
+    assert "input_image" in types, "TreeEvenPartitioning must produce a rendered graph image."
+
+    oracle = info_dict["agent_0"]["oracle_answer"]
+    assert isinstance(oracle, str) and "\n" in oracle, (
+        "oracle_answer is a newline-joined multi-line partition string."
+    )
+
+    _obs, reward_dict, _term, _trunc, _info = env.step({"agent_0": oracle})
+    assert reward_dict["agent_0"] == 1.0, "Stepping with the oracle partition must score 1.0."
+
+    env2 = gym_v.make(
+        "Graphs/TreeEvenPartitioning-v0",
+        max_n=3, max_k=3, node_radius=20, image_size=800, padding=80,
+    )
+    env2.reset(seed=1729)
+    _obs, reward_dict, _term, _trunc, _info = env2.step({"agent_0": "garbage answer"})
+    assert reward_dict["agent_0"] == 0.0, "Malformed partition must score 0.0."
+
+
+@requires_gym_v
+def test_real_misetree_reset_and_step_with_oracle_answer() -> None:
+    import gym_v
+
+    from resources_servers.gym_v._observation import observation_to_user_message
+
+    env = gym_v.make(
+        "Graphs/MaximumIndependentSetTree-v0",
+        max_n=6,
+        node_radius=22,
+        image_size=700,
+        padding=60,
+    )
+    obs_dict, info_dict = env.reset(seed=1729)
+    assert set(obs_dict.keys()) == {"agent_0"}
+
+    message = observation_to_user_message(
+        obs_dict["agent_0"],
+        env_id="Graphs/MaximumIndependentSetTree-v0",
+        prefix_text=env.description if isinstance(env.description, str) else "",
+    )
+    types = [part.get("type") for part in message.content]
+    assert "input_image" in types, "MISETree must produce a rendered tree image."
+
+    oracle = info_dict["agent_0"]["oracle_answer"]
+    assert isinstance(oracle, str) and oracle.strip(), (
+        "oracle_answer is a space-separated vertex list."
+    )
+
+    _obs, reward_dict, _term, _trunc, _info = env.step({"agent_0": oracle})
+    # Graded reward (answer/gold)^beta with beta=3; oracle should score exactly 1.0.
+    assert reward_dict["agent_0"] == 1.0, "Stepping with the oracle MIS must score 1.0."
+
+    env2 = gym_v.make(
+        "Graphs/MaximumIndependentSetTree-v0",
+        max_n=6, node_radius=22, image_size=700, padding=60,
+    )
+    env2.reset(seed=1729)
+    _obs, reward_dict, _term, _trunc, _info = env2.step({"agent_0": "not-an-integer"})
+    assert reward_dict["agent_0"] == 0.0, "Non-integer answer must score 0.0."
+
+
+@requires_gym_v
+def test_real_tangram_reset_and_step_with_oracle_answer() -> None:
+    import gym_v
+
+    from resources_servers.gym_v._observation import observation_to_user_message
+
+    env = gym_v.make(
+        "Geometry/Tangram-QA-v0",
+        grid_size=5,
+        num_seeds=4,
+        num_pieces_to_remove=1,
+        question_type=0,  # piece_count
+    )
+    obs_dict, info_dict = env.reset(seed=1729)
+    assert set(obs_dict.keys()) == {"agent_0"}
+
+    message = observation_to_user_message(
+        obs_dict["agent_0"],
+        env_id="Geometry/Tangram-QA-v0",
+        prefix_text=env.description if isinstance(env.description, str) else "",
+    )
+    types = [part.get("type") for part in message.content]
+    assert "input_image" in types, "Tangram-QA must produce a rendered puzzle image."
+
+    oracle = info_dict["agent_0"]["oracle_answer"]
+    assert isinstance(oracle, str) and oracle.strip(), (
+        "oracle_answer is an MCQ letter or option string."
+    )
+
+    _obs, reward_dict, _term, _trunc, _info = env.step({"agent_0": oracle})
+    assert reward_dict["agent_0"] == 1.0, "Stepping with the oracle MCQ must score 1.0."
+
+    env2 = gym_v.make(
+        "Geometry/Tangram-QA-v0",
+        grid_size=5, num_seeds=4, num_pieces_to_remove=1, question_type=0,
+    )
+    env2.reset(seed=1729)
+    _obs, reward_dict, _term, _trunc, _info = env2.step({"agent_0": "definitely_not_an_option"})
+    assert reward_dict["agent_0"] == 0.0, "Garbage MCQ answer must score 0.0."
+
+
+@requires_gym_v
+@requires_matplotlib
+def test_real_smallestcircle_reset_and_step_with_oracle_answer() -> None:
+    import gym_v
+
+    from resources_servers.gym_v._observation import observation_to_user_message
+
+    env = gym_v.make("Geometry/SmallestCircle-v0", n_points=6)
+    obs_dict, info_dict = env.reset(seed=1729)
+    assert set(obs_dict.keys()) == {"agent_0"}
+
+    message = observation_to_user_message(
+        obs_dict["agent_0"],
+        env_id="Geometry/SmallestCircle-v0",
+        prefix_text=env.description if isinstance(env.description, str) else "",
+    )
+    types = [part.get("type") for part in message.content]
+    assert "input_image" in types, "SmallestCircle must produce a rendered scatter plot."
+
+    oracle = info_dict["agent_0"]["oracle_answer"]
+    assert isinstance(oracle, str) and len(oracle.split()) == 3, (
+        "oracle_answer is 'x y r' space-separated."
+    )
+
+    _obs, reward_dict, _term, _trunc, _info = env.step({"agent_0": oracle})
+    # Reward is (gold/answer)^beta; oracle ↔ gold so reward == 1.0 exactly.
+    assert reward_dict["agent_0"] == 1.0, "Stepping with the oracle circle must score 1.0."
+
+    env2 = gym_v.make("Geometry/SmallestCircle-v0", n_points=6)
+    env2.reset(seed=1729)
+    # Tiny circle at origin: infeasible (won't cover the points) → 0.
+    _obs, reward_dict, _term, _trunc, _info = env2.step({"agent_0": "0 0 0.001"})
+    assert reward_dict["agent_0"] == 0.0, "Infeasible circle must score 0.0."
