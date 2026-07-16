@@ -59,6 +59,12 @@ GAMES: dict[str, tuple[str, str]] = {
         "Action: 'x y r' (three floats). Reward: (gold/answer)^10 when feasible, "
         "else 0. Needs matplotlib.",
     ),
+    "Cognition/TransformResultPoly-v0": (
+        '{"grid_divisions": 8, "img_size": 300, "line_width": 3, "num_points": 8, '
+        '"option_size": 280, "padding": 20}',
+        "MCQ: pick which option image is the correct transform of the source polygon. "
+        "Action: single letter a-h (optionally parenthesized). Reward: 1/0.",
+    ),
 }
 
 DEFAULT_ENV_ID = next(iter(GAMES))

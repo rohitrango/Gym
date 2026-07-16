@@ -49,7 +49,8 @@ _VISIBLE_METADATA_KEYS: dict[str, list[str]] = {
     # to [] so only prefix_text (env.description) + image are sent.
     # For envs where the ASCII fallback is intentional (e.g. GameOfLife
     # whose grid output format matches state_text), keep ["state_text"].
-    "Algorithmic/GameOfLife-v0": ["state_text"],
+    # "Algorithmic/GameOfLife-v0": ["state_text"],
+    "Algorithmic/GameOfLife-v0": [],
     "Logic/MiniSudoku-v0": [],
     "Puzzles/TowerOfHanoi-v0": [],
     "Puzzles/Maze-QA-v0": ["state_text"],
@@ -63,8 +64,30 @@ _VISIBLE_METADATA_KEYS: dict[str, list[str]] = {
 }
 
 
-def image_to_data_url(image: Image.Image, fmt: str = "PNG", jpeg_quality: int = 90) -> str:
-    """Encode a PIL image as an OpenAI-compatible base64 data URL."""
+def image_to_data_url(
+    image: Image.Image,
+    fmt: str = "PNG",
+    jpeg_quality: int = 90,
+    max_image_wh: int | None = None,
+) -> str:
+    """Encode a PIL image as an OpenAI-compatible base64 data URL.
+
+    If ``max_image_wh`` is set and ``max(W, H) > max_image_wh``, the image is
+    resized in aspect-ratio-preserving fashion so that ``max(W, H) ==
+    max_image_wh`` — both dimensions are scaled by ``max_image_wh / max(W,
+    H)`` via ``PIL.Image.thumbnail``. Examples with ``max_image_wh=512``:
+    ``1220x1040 → 512x436``, ``512x1024 → 256x512``, ``400x400 → 400x400``
+    (unchanged, already ≤ cap).
+    """
+
+    if max_image_wh is not None and max(image.size) > max_image_wh:
+        # thumbnail mutates in place; copy so we don't clobber the caller's
+        # cached observation image across a subsequent env reset/step.
+        image = image.copy()
+        image.thumbnail(
+            (max_image_wh, max_image_wh),
+            Image.Resampling.LANCZOS,
+        )
 
     normalized_fmt = fmt.upper()
     buf = io.BytesIO()
@@ -109,8 +132,13 @@ def observation_to_user_message(
     image_format: str = "PNG",
     image_jpeg_quality: int = 90,
     skip_images: bool = False,
+    max_image_wh: int | None = None,
 ) -> GymVEnvStateEasyInputMessage:
-    """Build the multimodal user message emitted by the Gym-V resources server."""
+    """Build the multimodal user message emitted by the Gym-V resources server.
+
+    ``max_image_wh`` (optional) caps ``max(W, H)`` of each observation image
+    with aspect ratio preserved; see :func:`image_to_data_url` for details.
+    """
 
     parts: list[dict[str, Any]] = []
 
@@ -137,6 +165,7 @@ def observation_to_user_message(
                         image,
                         fmt=image_format,
                         jpeg_quality=image_jpeg_quality,
+                        max_image_wh=max_image_wh,
                     ),
                     # ResponseInputImageParam.detail is required by the OpenAI
                     # Responses API; vLLM accepts "auto" verbatim.

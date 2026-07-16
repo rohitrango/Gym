@@ -10,6 +10,7 @@ gym_v_resources_server:
       task_jsonl_fpaths: []
       image_format: "PNG"
       image_jpeg_quality: 90
+      max_image_wh: null   # cap rendered image max(W,H); null = no cap
       skip_images: false
       enforce_horizon_cap: true
       return_transitions: false

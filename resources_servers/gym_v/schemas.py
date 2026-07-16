@@ -95,6 +95,19 @@ class GymVResourcesServerConfig(BaseResourcesServerConfig):
     )
     image_format: Literal["PNG", "JPEG"] = "PNG"
     image_jpeg_quality: int = Field(default=90, ge=1, le=100)
+    max_image_wh: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "If set, resize every rendered observation image so that "
+            "max(W, H) == max_image_wh, preserving aspect ratio (both "
+            "dimensions scaled by max_image_wh / max(W, H) via "
+            "PIL.Image.thumbnail). Default null (no resize) — envs render "
+            "at their native size. Set to a modest value (e.g. 512) to cap "
+            "the visual-token budget on large-image envs and reduce vLLM "
+            "context-overflow rejections."
+        ),
+    )
     skip_images: bool = Field(
         default=False,
         description=(

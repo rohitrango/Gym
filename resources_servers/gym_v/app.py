@@ -224,6 +224,7 @@ class GymVResourcesServer(SimpleResourcesServer):
             image_format=self.config.image_format,
             image_jpeg_quality=self.config.image_jpeg_quality,
             skip_images=self.config.skip_images,
+            max_image_wh=self.config.max_image_wh,
         )
 
         return GymVSeedSessionResponse(
@@ -305,6 +306,7 @@ class GymVResourcesServer(SimpleResourcesServer):
             image_format=self.config.image_format,
             image_jpeg_quality=self.config.image_jpeg_quality,
             skip_images=self.config.skip_images,
+            max_image_wh=self.config.max_image_wh,
         )
         obs_msg = _attach_env_info(obs_msg, self._agent_0_info(info_dict))
 
@@ -365,6 +367,7 @@ class GymVResourcesServer(SimpleResourcesServer):
             prefix_text=None,
             image_format=self.config.image_format,
             image_jpeg_quality=self.config.image_jpeg_quality,
+            max_image_wh=self.config.max_image_wh,
         )
         return _attach_env_info(recovery, env_info)
 

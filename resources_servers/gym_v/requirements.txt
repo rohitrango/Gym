@@ -1,4 +1,4 @@
 -e nemo-gym[dev] @ ../../
-gym-v[games,spatial,reasoning-gym] @ git+https://github.com/aroshanghias-nvd/gym-v.git@main
+gym-v[games,spatial,reasoning-gym] @ git+https://github.com/rohitrango/gym-v.git@main
 pillow>=11,<13
 pytest>=8
