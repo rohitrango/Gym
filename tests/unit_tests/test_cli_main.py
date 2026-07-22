@@ -18,6 +18,7 @@ import sys
 import types
 
 import pytest
+from hydra.core.override_parser.overrides_parser import OverridesParser
 from pytest import MonkeyPatch
 
 import nemo_gym.cli.main as cli_main
@@ -654,6 +655,7 @@ class TestJsonFlag:
         [
             (["list", "benchmarks", "--json"], "nemo_gym.cli.eval:list_benchmarks"),
             (["list", "agents", "--json"], "nemo_gym.cli.agents:list_agents"),
+            (["list", "models", "--json"], "nemo_gym.cli.models:list_models"),
             (["env", "status", "--json"], "nemo_gym.cli.env:status"),
         ],
     )
@@ -669,15 +671,41 @@ class TestJsonFlag:
 
 
 class TestSearch:
-    def test_search_routes_to_list_with_query(self, monkeypatch: MonkeyPatch) -> None:
-        # `gym search <query>` reuses the benchmarks listing, passing the query as the `query` config key.
+    def test_search_query_only_defaults_to_benchmarks(self, monkeypatch: MonkeyPatch) -> None:
+        # `gym search <query>` (no type) reuses the benchmarks listing — backward compatible.
         target, overrides = _dispatch_for(monkeypatch, ["search", "math"])
         assert target == "nemo_gym.cli.eval:list_benchmarks"
-        assert overrides == ["+query=math"]
+        assert overrides == ['+query="math"']
+
+    @pytest.mark.parametrize(
+        "component_type, expected_target",
+        [
+            ("benchmarks", "nemo_gym.cli.eval:list_benchmarks"),
+            ("environments", "nemo_gym.cli.env:list_environments"),
+            ("agents", "nemo_gym.cli.agents:list_agents"),
+            ("models", "nemo_gym.cli.models:list_models"),
+            ("resources-servers", "nemo_gym.cli.resources_servers:list_resources_servers"),
+        ],
+    )
+    def test_search_type_routes_to_that_listing(self, monkeypatch, component_type, expected_target) -> None:
+        # `gym search <type> <query>` runs that type's listing, filtered by the query.
+        target, overrides = _dispatch_for(monkeypatch, ["search", component_type, "swe"])
+        assert target == expected_target
+        assert overrides == ['+query="swe"']
 
     def test_search_json(self, monkeypatch: MonkeyPatch) -> None:
         _, overrides = _dispatch_for(monkeypatch, ["search", "math", "--json"])
-        assert set(overrides) == {"+query=math", "+json=true"}
+        assert set(overrides) == {'+query="math"', "+json=true"}
+
+    @pytest.mark.parametrize("query", ["(A)", "a b", "[x]", "A|B"])
+    def test_search_query_with_special_chars_is_hydra_safe(self, monkeypatch: MonkeyPatch, query) -> None:
+        # The query is quoted so Hydra's override grammar accepts characters that are otherwise syntax,
+        # e.g. `gym search agents "(A)"` used to raise an override parse error. The quoted override must
+        # both be valid Hydra and round-trip back to the original query string.
+        _, overrides = _dispatch_for(monkeypatch, ["search", "agents", query])
+        assert overrides == [f'+query="{query}"']
+        parsed = OverridesParser.create().parse_overrides(overrides)[0]
+        assert parsed.value() == query
 
     def test_version_json_dispatches_with_override(self, monkeypatch: MonkeyPatch) -> None:
         # `gym --version --json` is the top-level path; it still forwards +json=true to the version command.
@@ -947,10 +975,14 @@ class TestDidYouMean:
     """difflib-backed "did you mean?" hints for mistyped commands, flags, and component names (proposal UX 4)."""
 
     def test_helper_suggests_close_match(self) -> None:
-        assert cli_main._did_you_mean("evl", ["list", "eval", "env"]) == " Did you mean `eval`?"
+        from nemo_gym.cli.utils import did_you_mean
+
+        assert did_you_mean("evl", ["list", "eval", "env"]) == " Did you mean `eval`?"
 
     def test_helper_silent_when_nothing_close(self) -> None:
-        assert cli_main._did_you_mean("zzzzzz", ["list", "eval", "env"]) == ""
+        from nemo_gym.cli.utils import did_you_mean
+
+        assert did_you_mean("zzzzzz", ["list", "eval", "env"]) == ""
 
     def _run_expecting_exit(self, monkeypatch: MonkeyPatch, capsys, argv: list[str]) -> str:
         monkeypatch.setattr(cli_main, "dispatch", lambda target, overrides: None)
@@ -988,6 +1020,19 @@ class TestDidYouMean:
         )
         assert "Did you mean `dapo17k`?" in err
 
+    def test_benchmark_group_dir_suggests_a_nested_token(self, monkeypatch: MonkeyPatch, capsys) -> None:
+        # `livecodebench` is a directory that only groups benchmarks (its configs are nested), so it is not
+        # itself a valid `--benchmark` value. The hint must point at a real nested token, not circle back to
+        # the bare directory name.
+        err = self._run_expecting_exit(monkeypatch, capsys, ["eval", "run", "--benchmark", "livecodebench"])
+        assert "Did you mean `livecodebench/" in err
+        assert "Did you mean `livecodebench`?" not in err
+
+    def test_benchmark_group_dir_with_flavor_configs_subdir(self, monkeypatch: MonkeyPatch, capsys) -> None:
+        # tau2 keeps its benchmarks under `configs/`; the hint should surface one of those tokens.
+        err = self._run_expecting_exit(monkeypatch, capsys, ["eval", "prepare", "--benchmark", "tau2"])
+        assert "Did you mean `tau2/configs/" in err
+
 
 class TestSearchDir:
     """--search-dir registers extra roots that the name->config selectors also search (REQ 5)."""
@@ -995,7 +1040,9 @@ class TestSearchDir:
     def _make_user_benchmark(self, tmp_path, name: str = "mybench") -> None:
         bench_dir = tmp_path / "benchmarks" / name
         bench_dir.mkdir(parents=True)
-        (bench_dir / "config.yaml").write_text("{}\n")
+        # A `type: benchmark` dataset so the config is discoverable as a real benchmark (the "did you mean"
+        # suggestions enumerate real benchmark tokens); resolution itself only needs the file to exist.
+        (bench_dir / "config.yaml").write_text("x:\n  datasets:\n  - type: benchmark\n")
 
     def test_resolves_component_from_user_dir(self, monkeypatch: MonkeyPatch, tmp_path) -> None:
         self._make_user_benchmark(tmp_path)

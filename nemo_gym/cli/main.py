@@ -13,29 +13,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import argparse
-import difflib
 import importlib
 import logging
 import os
 import re
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from nemo_gym import NEMO_GYM_EXTRA_ROOTS_ENV_VAR_NAME, _augment_sys_path, component_search_roots
+from nemo_gym.cli.utils import did_you_mean
 
 
 logger = logging.getLogger(__name__)
 
 VERSION_TARGET = "nemo_gym.cli.general:version"
-
-
-def _did_you_mean(value: str, candidates: Iterable[str]) -> str:
-    """A ` Did you mean \\`X\\`?` fragment for the closest candidate to `value`, or `""` if none is close enough."""
-    matches = difflib.get_close_matches(value, list(candidates), n=1)
-    return f" Did you mean `{matches[0]}`?" if matches else ""
 
 
 class _GymArgumentParser(argparse.ArgumentParser):
@@ -52,7 +46,7 @@ class _GymArgumentParser(argparse.ArgumentParser):
             choices = re.findall(r"'([^']+)'", match.group(2))
             if not choices:
                 choices = [choice.strip() for choice in match.group(2).split(",")]
-            message += _did_you_mean(typo, choices)
+            message += did_you_mean(typo, choices)
         super().error(message)
 
 
@@ -149,11 +143,39 @@ RESOURCES_SERVER = Flag(
 # global_config_dict.get(JSON_OUTPUT_KEY_NAME) (see general.py, eval.py, env.py).
 JSON = _bool_flag("json", "json", "Output as machine-readable JSON.")
 
-# Positional search query for `gym search`; surfaced to the listing command as the `query` config key.
-QUERY = Flag(
-    register=lambda p: p.add_argument("query", metavar="QUERY", help="Substring to match against component names."),
-    translate_to_hydra=lambda args: [f"+query={args.query}"] if getattr(args, "query", None) else [],
+# `gym search [<type>] <query>`: an optional component type plus the query. The query is surfaced to the
+# chosen listing command as the reserved `query` config key; the type only picks which command to run
+# (see `_search`). A lone positional is the query, defaulting to benchmarks — backward compatible.
+_SEARCHABLE_TYPES = {
+    "benchmarks": "nemo_gym.cli.eval:list_benchmarks",
+    "environments": "nemo_gym.cli.env:list_environments",
+    "agents": "nemo_gym.cli.agents:list_agents",
+    "models": "nemo_gym.cli.models:list_models",
+    "resources-servers": "nemo_gym.cli.resources_servers:list_resources_servers",
+}
+
+SEARCH_TERMS = Flag(
+    register=lambda p: (
+        p.add_argument(
+            "component_type",
+            nargs="?",
+            choices=list(_SEARCHABLE_TYPES),
+            help="Component type to search (default: benchmarks).",
+        ),
+        p.add_argument(
+            "query",
+            metavar="QUERY",
+            help="Text matched (substring or fuzzy) against a component's name, description, and key metadata.",
+        ),
+    ),
+    translate_to_hydra=lambda args: [f'+query="{args.query}"'] if getattr(args, "query", None) else [],
 )
+
+
+def _search(args: argparse.Namespace, overrides: list[str]) -> None:
+    """`gym search [<type>] <query>`: dispatch to the chosen type's listing command (default benchmarks),
+    which filters itself to the `query` config key already in `overrides`."""
+    dispatch(_SEARCHABLE_TYPES[getattr(args, "component_type", None) or "benchmarks"], overrides)
 
 
 # Asset selector flag -> (parent dir, configs subdir, default config flavor). All accept `name` or `name/flavor`,
@@ -201,25 +223,47 @@ def _asset_config_path(flag: str, value: str) -> str:
     if matches:
         return str(matches[0])
 
-    # No match: suggest the closest real name across all roots (a config flavor when the server exists, else a
-    # server name) and report the full paths that were searched.
-    available = ", ".join(set(f"`{(root / config_dir).resolve()}`" for root in roots if (root / config_dir).is_dir()))
-    typo = config_flavor
-    candidates = [p.stem for root in roots for p in (root / config_dir).glob("*.yaml")]
+    # No match: build a "did you mean?" hint and the roots searched
+    if flag == "benchmark":
+        # Benchmarks need special handling because some use non-standard config paths (arbitrary nesting), so
+        # the generic one-level flavor/sibling search below can't see them.
+        # Enumerate their real config names (the same values `gym list benchmarks` prints) instead.
+        from nemo_gym.benchmarks import _benchmark_config_name, _benchmark_config_paths
 
-    if len(candidates) == 0:
-        available = ", ".join(set(f"`{(root / parent).resolve()}`" for root in roots if (root / parent).is_dir()))
-        typo = server_name
-        candidates = [
-            child.name
+        config_names = {
+            _benchmark_config_name(p.relative_to(root / parent))
             for root in roots
-            if (root / parent).is_dir()
-            for child in (root / parent).iterdir()
-            if child.is_dir()
-        ]
+            for p in _benchmark_config_paths(root / parent)
+        }
+        # A bare directory that only groups benchmarks (e.g. `livecodebench`) is not itself selectable, so point
+        # at the config names under it; otherwise fall back to a fuzzy match across every token.
+        under_dir = sorted(config_name for config_name in config_names if config_name.startswith(f"{value}/"))
+        hint = f" Did you mean `{min(under_dir, key=len)}`?" if under_dir else did_you_mean(value, config_names)
+        available = ", ".join(sorted(f"`{(root / parent).resolve()}`" for root in roots if (root / parent).is_dir()))
+    else:
+        # Suggest the closest real name across all roots: a config flavor when the server exists, else a server
+        # name, reporting the full paths that were searched in each case.
+        available = ", ".join(
+            set(f"`{(root / config_dir).resolve()}`" for root in roots if (root / config_dir).is_dir())
+        )
+        typo = config_flavor
+        candidates = [p.stem for root in roots for p in (root / config_dir).glob("*.yaml")]
+
+        if len(candidates) == 0:
+            available = ", ".join(set(f"`{(root / parent).resolve()}`" for root in roots if (root / parent).is_dir()))
+            typo = server_name
+            candidates = [
+                child.name
+                for root in roots
+                if (root / parent).is_dir()
+                for child in (root / parent).iterdir()
+                if child.is_dir()
+            ]
+
+        hint = did_you_mean(typo, candidates)
 
     raise ValueError(
-        f"`--{flag} {value}` was specified which implies config `{path}`, which does not exist.{_did_you_mean(typo, candidates)} "
+        f"`--{flag} {value}` was specified which implies config `{path}`, which does not exist.{hint} "
         f"See available {flag} configs in {available}."
     )
 
@@ -297,7 +341,7 @@ def _dataset_download(args: argparse.Namespace, overrides: list[str]) -> None:
 
 # One-line help for each command group, shown in `gym --help`.
 GROUPS = {
-    "list": "List available components (benchmarks, agents, environments).",
+    "list": "List available components (benchmarks, environments, agents, models, resources-servers).",
     "dataset": "Manage datasets.",
     "env": "Develop and run environments.",
     "eval": "Run evaluations.",
@@ -322,10 +366,20 @@ COMMANDS = {
         summary="List agent harnesses and how each composes (Pattern A vs self-contained B).",
         flags=(JSON, SEARCH_DIR),
     ),
+    "list models": Command(
+        target="nemo_gym.cli.models:list_models",
+        summary="List model servers by the value to pass to --model-type.",
+        flags=(JSON, SEARCH_DIR),
+    ),
+    "list resources-servers": Command(
+        target="nemo_gym.cli.resources_servers:list_resources_servers",
+        summary="List resources servers (selectable with --resources-server) by name.",
+        flags=(JSON, SEARCH_DIR),
+    ),
     "search": Command(
-        target="nemo_gym.cli.eval:list_benchmarks",
-        summary="Search available components (currently benchmarks) by name; like `list` filtered to a query.",
-        flags=(QUERY, JSON, SEARCH_DIR),
+        target=_search,
+        summary="Search a component type (default benchmarks) by name; like `list` filtered to a query.",
+        flags=(SEARCH_TERMS, JSON, SEARCH_DIR),
     ),
     "dataset upload": Command(
         target=_dataset_upload,
@@ -659,7 +713,7 @@ def main() -> None:
     if unknown_flags:
         error_parser = getattr(args, "_parser", parser)
         known_options = [opt for action in error_parser._actions for opt in action.option_strings]
-        hints = "".join(_did_you_mean(flag.split("=", 1)[0], known_options) for flag in unknown_flags)
+        hints = "".join(did_you_mean(flag.split("=", 1)[0], known_options) for flag in unknown_flags)
         error_parser.error(f"unrecognized arguments: {' '.join(unknown_flags)}{hints}")
 
     # set NEMO_GYM_EXTRA_ROOTS from --search-dir for the duration of the command

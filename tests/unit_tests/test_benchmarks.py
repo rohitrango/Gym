@@ -19,7 +19,7 @@ import pytest
 from omegaconf import OmegaConf
 from yaml import safe_load
 
-from nemo_gym.cli.eval import _fuzzy_matches, list_benchmarks, prepare_benchmark
+from nemo_gym.cli.eval import list_benchmarks, prepare_benchmark
 
 
 def _mock_global_config(config: dict = None):
@@ -121,11 +121,15 @@ class TestListBenchmarks:
         assert json.loads(capsys.readouterr().out) == []
 
 
-class TestLoadBenchmarksFromConfigPaths:
-    def test_skips_configs_that_fail_to_resolve_with_warning(self, capsys) -> None:
+class TestDiscoverBenchmarksInDir:
+    def test_skips_configs_that_fail_to_resolve_with_warning(self, tmp_path: Path, capsys) -> None:
         # A candidate that still can't be resolved even with tolerance (e.g. a multi-benchmark suite) must
         # be skipped with a warning — not crash the whole listing, and not vanish silently.
-        from nemo_gym.benchmarks import BenchmarkConfig, _load_benchmarks_from_config_paths
+        from nemo_gym.benchmarks import BenchmarkConfig, _discover_benchmarks_in_dir
+
+        for name in ("bad", "good"):
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "config.yaml").write_text("x:\n  datasets:\n  - type: benchmark\n")
 
         good = MagicMock()
         good.name = "good_bench"
@@ -133,33 +137,62 @@ class TestLoadBenchmarksFromConfigPaths:
         # Listing must resolve tolerantly (it scans files with no runtime context), so it opts out of strict.
         def fake_from_config_path(path, *, strict=True):
             assert strict is False
-            if Path(path).name == "bad.yaml":
+            if Path(path).parent.name == "bad":
                 raise RuntimeError("cannot resolve without runtime values")
             return good
 
         with patch.object(BenchmarkConfig, "from_config_path", side_effect=fake_from_config_path):
-            result = _load_benchmarks_from_config_paths([Path("bad.yaml"), Path("good.yaml")])
+            result = _discover_benchmarks_in_dir(tmp_path)
 
-        assert set(result) == {"good_bench"}
+        # The surviving benchmark is keyed by its config name (path under the dir, sans `.yaml`), not `dataset.name`.
+        assert set(result) == {"good"}
         err = capsys.readouterr().err
-        assert "Warning" in err and "bad.yaml" in err
+        assert "Warning" in err and "bad" in err
 
     def test_every_repo_benchmark_appears_in_listing(self, capsys) -> None:
         # Every config that declares a `type: benchmark` dataset must surface as its own listing entry —
         # no silent drop from a name collision (the name-keyed dict is last-writer-wins) or a resolve
         # failure. Mirrors the content-based discovery in `list_benchmarks`.
-        from nemo_gym.benchmarks import BENCHMARKS_DIR, _benchmark_config_paths, _load_benchmarks_from_config_paths
+        from nemo_gym.benchmarks import BENCHMARKS_DIR, _benchmark_config_paths, _discover_benchmarks_in_dir
 
         config_paths = _benchmark_config_paths(BENCHMARKS_DIR)
         assert config_paths, "no benchmark configs discovered under BENCHMARKS_DIR"
 
-        benchmarks = _load_benchmarks_from_config_paths(config_paths)
+        benchmarks = _discover_benchmarks_in_dir(BENCHMARKS_DIR)
 
         assert len(benchmarks) == len(config_paths), (
             f"{len(config_paths)} benchmark config(s) discovered but only {len(benchmarks)} appear in the "
-            f"listing — a duplicate dataset name or resolve failure is hiding at least one.\n"
+            f"listing — a duplicate name or resolve failure is hiding at least one.\n"
             f"stderr:\n{capsys.readouterr().err}"
         )
+
+
+class TestBenchmarkConfigName:
+    @pytest.mark.parametrize(
+        "rel, expected",
+        [
+            ("aime24/config.yaml", "aime24"),  # `<name>/config.yaml` shortens to `<name>`
+            ("tau2/configs/tau2.yaml", "tau2/configs/tau2"),  # a flavor keeps its full relative path
+            ("livecodebench/v5_2408_2502/config.yaml", "livecodebench/v5_2408_2502/config"),  # nested: no shorten
+        ],
+    )
+    def test_name_matches_the_benchmark_selector(self, rel: str, expected: str) -> None:
+        from nemo_gym.benchmarks import _benchmark_config_name
+
+        assert _benchmark_config_name(Path(rel)) == expected
+
+    def test_every_listed_token_round_trips_through_the_benchmark_selector(self) -> None:
+        # The point of keying by token: every value `gym list benchmarks` prints must resolve back to its own
+        # config via `--benchmark`, using the same `_asset_config_path` mapping the CLI uses. This covers the
+        # benchmarks whose `dataset.name` diverges from their on-disk path (e.g. tau2, livecodebench).
+        from nemo_gym.benchmarks import discover_benchmarks
+        from nemo_gym.cli.main import _asset_config_path
+
+        benchmarks = discover_benchmarks()
+        assert benchmarks, "no benchmarks discovered"
+        for token, bench in benchmarks.items():
+            resolved = Path(_asset_config_path("benchmark", token))
+            assert resolved.resolve() == bench.path.resolve(), f"token {token!r} does not select its own config"
 
 
 class TestBenchmarkConfigStrictParsing:
@@ -181,33 +214,21 @@ class TestBenchmarkConfigStrictParsing:
         assert tolerated is None
 
 
-class TestFuzzyMatches:
-    def test_substring_matches(self) -> None:
-        assert _fuzzy_matches("math", "math_with_judge")
-
-    def test_token_typo_matches(self) -> None:
-        # `aimee` is a near-miss for the `aime` token in `aime24`.
-        assert _fuzzy_matches("aimee", "aime24")
-
-    def test_matches_against_agent_field(self) -> None:
-        assert _fuzzy_matches("judge", "aime24", "math_with_judge_agent")
-
-    def test_skips_empty_fields(self) -> None:
-        assert not _fuzzy_matches("math", "", None)
-
-    def test_no_match(self) -> None:
-        assert not _fuzzy_matches("zzznomatch", "aime24", "math_with_judge")
-
-
 class TestSearchBenchmarks:
     # Map each benchmark name to the `domain` its config would resolve to.
     DOMAINS = {
         "aime24": "math",
         "gpqa_diamond": "science",
     }
+    # Descriptions carry text found in neither the name nor the domain, so a match proves description is searched.
+    DESCRIPTIONS = {
+        "aime24": "Competition problems from the AIME.",
+        "gpqa_diamond": "Graduate-level questions written by PhD experts.",
+    }
 
     def _bench(self, key: str):
         bench = MagicMock(agent_name="my_agent", num_repeats=1)
+        bench.name = key  # `dataset.name`; also fuzzy-matched by `gym search`
         bench.path = key  # the patched read_config_metadata keys off the path to find the domain
         return bench
 
@@ -218,7 +239,10 @@ class TestSearchBenchmarks:
         with (
             patch("nemo_gym.cli.eval.get_global_config_dict", return_value=_mock_global_config({"query": query})),
             patch("nemo_gym.cli.eval.discover_benchmarks", return_value=benchmarks),
-            patch("nemo_gym.cli.eval.read_config_metadata", side_effect=lambda path: (self.DOMAINS[path], None)),
+            patch(
+                "nemo_gym.cli.eval.read_config_metadata",
+                side_effect=lambda path: (self.DOMAINS[path], self.DESCRIPTIONS[path]),
+            ),
         ):
             list_benchmarks()
         return capsys.readouterr().out
@@ -234,9 +258,15 @@ class TestSearchBenchmarks:
         assert "gpqa_diamond" in out
         assert "aime24" not in out
 
+    def test_query_matches_description(self, capsys) -> None:
+        # "PhD" only appears in gpqa's description, not its name/domain.
+        out = self._run("PhD", self._benchmarks(), capsys)
+        assert "gpqa_diamond" in out
+        assert "aime24" not in out
+
     def test_query_does_not_match_resource_server(self, capsys) -> None:
         # "judge" appears only in a resources server name, which is no longer searched:
-        # matching is restricted to the benchmark name and domain.
+        # matching is restricted to the benchmark name, domain, and description.
         assert "No benchmarks match 'judge'" in self._run("judge", self._benchmarks(), capsys)
 
     def test_query_no_match_message(self, capsys) -> None:
@@ -279,7 +309,6 @@ class TestPrepareBenchmark:
                     {"config_paths": [str(config_path)], **safe_load(config_path.read_text())}
                 ),
             ),
-            patch("nemo_gym.cli.eval.BENCHMARKS_DIR", bench_dir.parent),
             patch("nemo_gym.cli.eval.importlib.import_module", return_value=mock_module),
         ):
             prepare_benchmark()
@@ -296,7 +325,6 @@ class TestPrepareBenchmark:
                     {"config_paths": [str(config_path)], **safe_load(config_path.read_text())}
                 ),
             ),
-            patch("nemo_gym.cli.eval.BENCHMARKS_DIR", bench_dir.parent),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 prepare_benchmark()
@@ -316,7 +344,6 @@ class TestPrepareBenchmark:
                     {"config_paths": [str(config_path)], **safe_load(config_path.read_text())}
                 ),
             ),
-            patch("nemo_gym.cli.eval.BENCHMARKS_DIR", bench_dir.parent),
             patch("nemo_gym.cli.eval.importlib.import_module", return_value=mock_module),
         ):
             with pytest.raises(SystemExit) as exc_info:
@@ -369,7 +396,6 @@ class TestPrepareBenchmark:
                     {"config_paths": [str(config_path)], **safe_load(config_path.read_text())}
                 ),
             ),
-            patch("nemo_gym.cli.eval.BENCHMARKS_DIR", bench_dir.parent),
             patch("nemo_gym.cli.eval.importlib.import_module", return_value=mock_module),
         ):
             prepare_benchmark()
@@ -394,7 +420,6 @@ class TestPrepareBenchmark:
                     }
                 ),
             ),
-            patch("nemo_gym.cli.eval.BENCHMARKS_DIR", bench_dir.parent),
             patch("nemo_gym.cli.eval.importlib.import_module", return_value=mock_module),
         ):
             prepare_benchmark()
