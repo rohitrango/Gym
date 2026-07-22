@@ -1,0 +1,22 @@
+polygon_naming_resources_server:
+  resources_servers:
+    polygon_naming:
+      entrypoint: app.py
+      domain: other
+      verified: false
+      description: Two-turn multimodal polygon naming — identify (sides, colour) for 3 rendered polygons across 2 turns.
+polygon_naming_multimodal_simple_agent:
+  responses_api_agents:
+    multimodal_simple_agent:
+      entrypoint: app.py
+      resources_server:
+        type: resources_servers
+        name: polygon_naming_resources_server
+      model_server:
+        type: responses_api_models
+        name: policy_model
+      max_steps: 6
+      datasets:
+      - name: example
+        type: example
+        jsonl_fpath: resources_servers/polygon_naming/data/example.jsonl
